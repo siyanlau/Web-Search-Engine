@@ -1,6 +1,4 @@
-
-import urllib.robotparser
-from urllib.parse import urlparse
+import urllib.request, urllib.robotparser
 
 class RobotCache:
     def __init__(self, user_agent: str, timeout: float = 5.0):
@@ -10,14 +8,18 @@ class RobotCache:
 
     def _fetch_parser(self, root: str):
         rp = urllib.robotparser.RobotFileParser()
-        rp.set_url(root)
         try:
-            rp.read()
-        except Exception:
-            pass
+            req = urllib.request.Request(root, headers={"User-Agent": self.user_agent})
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                text = resp.read().decode("utf-8", errors="ignore")
+            rp.parse(text.splitlines())
+        except Exception as e:
+            # fallback: treat as allow-all if we can’t fetch
+            rp.parse(["User-agent: *", "Disallow:"])  
         return rp
 
     def can_fetch(self, url: str) -> bool:
+        from urllib.parse import urlparse
         host = urlparse(url).netloc
         if not host:
             return False
@@ -26,7 +28,4 @@ class RobotCache:
         if rp is None:
             rp = self._fetch_parser(robots_url)
             self.cache[robots_url] = rp
-        try:
-            return rp.can_fetch(self.user_agent, url)
-        except Exception:
-            return True
+        return rp.can_fetch(self.user_agent, url)

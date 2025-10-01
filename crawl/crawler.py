@@ -1,20 +1,25 @@
-
 import csv, time
 from collections import deque
 from urllib.parse import urldefrag
 
 from .fetch import fetch_url
 from .parse import LinkExtractor
+from .robots import RobotCache
 
 def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     visited = set()
     q = deque()
+
+    robots = RobotCache(user_agent=ua, timeout=timeout)  # cache per-host
+
+    # Seed enqueue (respect robots here too)
     for s in seeds:
         s = s.strip()
         if not s:
             continue
         s, _ = urldefrag(s)
-        q.append((s, 0))
+        if robots.can_fetch(s):              # skip disallowed seeds
+            q.append((s, 0))
 
     outfh = open(out_csv, "w", newline="", encoding="utf-8")
     writer = csv.writer(outfh)
@@ -24,10 +29,12 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     try:
         while q and fetched < max_pages:
             url, depth = q.popleft()
+
             res = fetch_url(url, timeout, ua)
             final_url = res["final_url"]
             status = res["status"]
             body = res["body"]
+
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             writer.writerow([ts_iso, final_url, status, depth])
             fetched += 1
@@ -39,15 +46,18 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
             if not body or depth >= max_depth:
                 continue
 
-            # parse links
+            # Parse links and enqueue children (robots check BEFORE enqueue)
             try:
                 parser = LinkExtractor(final_url)
                 text = body.decode("utf-8", errors="replace")
                 parser.feed(text)
                 for child in parser.links:
-                    if child not in visited:
-                        q.append((child, depth + 1))
+                    if child in visited:
+                        continue
+                    if not robots.can_fetch(child):  # skip disallowed
+                        continue
+                    q.append((child, depth + 1))
             except Exception:
-                continue
+                pass
     finally:
         outfh.close()
