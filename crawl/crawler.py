@@ -1,4 +1,4 @@
-import csv, time
+import csv, time, random
 from collections import deque
 from urllib.parse import urldefrag, urlparse
 
@@ -58,6 +58,17 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
                 links = parser.links
                 print(f"[PARSE] found {len(links)} links at {final_url}")
 
+                # --- NEW: cap logic ---
+                max_keep = 100
+                oversample = 200
+                if len(links) > max_keep:
+                    sample_idx = random.sample(
+                        range(len(links)), min(oversample, len(links))
+                    )
+                    links = [links[i] for i in sample_idx]
+                    print(f"[CAP] page had {len(parser.links)} links → capped to {len(links)} candidates")
+                # ----------------------
+
                 accepted = 0
                 for child in links:
                     if child in visited:
@@ -72,6 +83,8 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
                         continue
                     q.append((child, depth + 1))
                     accepted += 1
+                    if accepted >= max_keep:
+                        break
 
                 print(f"[ENQUEUE] accepted={accepted}, queue_size={len(q)}")
 
