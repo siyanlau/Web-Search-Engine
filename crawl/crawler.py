@@ -18,7 +18,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
 
     outfh = open(out_csv, "w", newline="", encoding="utf-8")
     writer = csv.writer(outfh)
-    writer.writerow(["ts_iso", "url", "status"])  # v0.2 (status-only)
+    writer.writerow(["ts_iso", "url", "status", "depth"])
 
     fetched = 0
     try:
@@ -29,7 +29,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
             status = res["status"]
             body = res["body"]
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            writer.writerow([ts_iso, final_url, status])
+            writer.writerow([ts_iso, final_url, status, depth])
             fetched += 1
 
             if final_url in visited:

@@ -1,3 +1,5 @@
+https://www.amazon.com/404
+https://github.com/siyanlau/CS-GY-6613
 https://en.wikipedia.org/wiki/Cat
 https://github.com/topics/stanford-engineering
 https://www.python.org/
