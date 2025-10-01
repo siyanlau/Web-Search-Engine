@@ -70,7 +70,7 @@ def fetch_url(url, timeout, ua):
 
 def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     visited = set()
-    q = deque() # tuple of 3. (URL, depth, parent URL)
+    q = deque()
     for s in seeds:
         s = s.strip()
         if not s:
@@ -84,7 +84,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     writer = csv.writer(outfh)
     writer.writerow(["ts_iso", "url"])  # v0.1 schema
 
-    fetched = 0 # set the counter
+    fetched = 0
     try:
         while q and fetched < max_pages:
             url, depth, ref = q.popleft()
