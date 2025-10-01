@@ -1,0 +1,9 @@
+without file type blacklisting: 
+real    0m23.531s
+user    0m0.093s
+sys     0m0.060s
+
+with file type blacklisting:
+real    0m21.236s
+user    0m0.046s
+sys     0m0.015s
