@@ -1,41 +1,53 @@
 
-from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler, HTTPHandler
-from urllib.error import URLError, HTTPError
+import urllib.request, urllib.error
+import gzip, io, zlib
 
-def fetch_url(url: str, timeout: float, ua: str):
+def fetch_url(url, timeout, ua):
     """
-    Return a dict with: final_url, status, content_type, body (bytes or None).
-    - Follows redirects (via default handlers).
-    - Reads body only for text/html
+    Fetch a URL and return dict with {final_url, status, body}.
+    - Always sets User-Agent and Accept-Encoding.
+    - Explicitly handles gzip/deflate content-encoding.
+    - Returns None body if not HTML.
     """
-    opener = build_opener(HTTPRedirectHandler, HTTPHandler, HTTPSHandler)
-    req = Request(url, headers={"User-Agent": ua})
+    headers = {
+        "User-Agent": ua,
+        # ask for compressed data, since we know how to handle it
+        "Accept-Encoding": "gzip, deflate",
+    }
+    req = urllib.request.Request(url, headers=headers)
+
     try:
-        with opener.open(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             final_url = resp.geturl()
-            ctype = resp.headers.get("Content-Type", "") or ""
-            status = getattr(resp, "status", 200)
-            body = None
-            if "text/html" in ctype.lower():
-                body = resp.read()
-            return {"final_url": final_url, "status": status, "content_type": ctype, "body": body}
-    except HTTPError as e:
-        return {"final_url": getattr(e, "url", url), "status": e.code, "content_type": "", "body": None}
-    except URLError as e:
-        # Represent network issues as a string status
-        reason = getattr(e, "reason", None)
-        if reason:
-            s = str(reason).lower()
-            if "timed out" in s or "timeout" in s:
-                status = "error:timeout"
-            elif "name or service not known" in s or "nodename nor servname" in s:
-                status = "error:dns"
-            elif "ssl" in s:
-                status = "error:ssl"
+            status = resp.status
+            raw = resp.read()
+
+            # decompress if needed
+            encoding = resp.headers.get("Content-Encoding", "").lower()
+            if encoding == "gzip":
+                try:
+                    raw = gzip.GzipFile(fileobj=io.BytesIO(raw)).read()
+                except Exception:
+                    pass  # fall back to raw if decompression fails
+            elif encoding == "deflate":
+                try:
+                    raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+                except Exception:
+                    try:
+                        raw = zlib.decompress(raw)
+                    except Exception:
+                        pass
+
+            # content-type check
+            ctype = resp.headers.get("Content-Type", "").lower()
+            if "text/html" not in ctype:
+                body = None
             else:
-                status = "error:urlerror"
-        else:
-            status = "error:urlerror"
-        return {"final_url": url, "status": status, "content_type": "", "body": None}
+                body = raw
+
+            return {"final_url": final_url, "status": status, "body": body}
+
+    except urllib.error.HTTPError as e:
+        return {"final_url": url, "status": e.code, "body": None}
     except Exception as e:
-        return {"final_url": url, "status": "error:" + e.__class__.__name__.lower(), "content_type": "", "body": None}
+        return {"final_url": url, "status": f"error:{type(e).__name__}", "body": None}

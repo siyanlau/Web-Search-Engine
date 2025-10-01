@@ -1,4 +1,4 @@
-from robots import RobotCache
+from crawl.robots import RobotCache
 
 def test_urls():
     rc = RobotCache("MiniCrawlerTest/0.2", timeout=5)
