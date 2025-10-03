@@ -53,7 +53,6 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
             if fetched_state[0] >= max_pages:
                 return
             if not frontier:
-                # Nothing to do right now → give other threads time and retry
                 url = None
             else:
                 neg_prio, depth, _, url, prio_at_pop = heapq.heappop(frontier)
@@ -130,28 +129,35 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
                     continue
                 filtered.append(u)
 
-            # Step 3: robots + enqueue children with scores
-            accepted = 0
-            with frontier_lock:
-                for child in filtered:
-                    if child in visited or child in in_frontier:
-                        continue
-                    if not robots.can_fetch(child):
-                        print(f"[ROBOTS] [W{worker_id}] disallow {child}")
-                        continue
-                    cd = get_domain(child)
-                    csd = get_superdomain(child)
-                    cd_before = pages_per_domain.get(cd, 0)
-                    csd_before = pages_per_superdomain.get(csd, 0)
-                    _, _, tp = _compute_priority(cd_before, csd_before)
-                    heapq.heappush(frontier, (-tp, depth + 1, seq, child, tp))
-                    in_frontier.add(child)
-                    seq += 1
-                    accepted += 1
-                    if accepted >= MAX_KEEP:
-                        break
+            # Step 3: robots check OUTSIDE lock
+            to_enqueue = []
+            for child in filtered:
+                if child in visited or child in in_frontier:
+                    continue
+                if not robots.can_fetch(child):
+                    print(f"[ROBOTS] [W{worker_id}] disallow {child}")
+                    continue
+                cd = get_domain(child)
+                csd = get_superdomain(child)
+                cd_before = pages_per_domain.get(cd, 0)
+                csd_before = pages_per_superdomain.get(csd, 0)
+                _, _, tp = _compute_priority(cd_before, csd_before)
+                to_enqueue.append(( -tp, depth + 1, seq, child, tp ))
+                seq += 1
 
-            print(f"[ENQUEUE] [W{worker_id}] accepted={accepted}, frontier_size={len(frontier)}")
+            # Step 4: bulk push inside lock
+            if to_enqueue:
+                with frontier_lock:
+                    accepted = 0
+                    for item in to_enqueue:
+                        _, _, _, child, _ = item
+                        if child not in visited and child not in in_frontier:
+                            heapq.heappush(frontier, item)
+                            in_frontier.add(child)
+                            accepted += 1
+                            if accepted >= MAX_KEEP:
+                                break
+                print(f"[ENQUEUE] [W{worker_id}] accepted={accepted}, frontier_size={len(frontier)}")
 
         except Exception as e:
             print(f"[PARSE ERROR] [W{worker_id}] {e}")

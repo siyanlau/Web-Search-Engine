@@ -21,4 +21,10 @@ Because our algorithm is biased towards new domains, we actually have to do enqu
 
 Setting: depth=5, worker=32, page=1000
 Original Performance:  time=12m23.947s
-After Improvement: time= 
+After Improvement: time=2m56.622s
+
+I'm still not happy with the robot bottleneck. My crawler spends at least half of its time doing robots compliance. This is when I realized a design issue: I check every URL (100 or less randomly picked links for a single visited page) against robots policy
+when in reality this is not necessary, because most of these URLs won't be visited anyways. We can just put all URLs on the PQ, and check on-the-go when a URL is picked. If it violates robots policy, just ignore it.
+
+Original Performance:  time=2m56.622s
+After Improvement: time=2m56.622s
