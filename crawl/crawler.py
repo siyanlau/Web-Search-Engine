@@ -110,6 +110,7 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
 
         # --- Skip children if body/status/depth not suitable ---
         if (not body) or (depth >= max_depth) or (status >= 400):
+            # status >= 400 includes a lot of issues, e.g. password protected pages. We just toss them all
             continue
 
         # --- Parse and enqueue children ---
