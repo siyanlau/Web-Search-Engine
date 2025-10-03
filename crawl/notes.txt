@@ -7,3 +7,5 @@ with file type blacklisting:
 real    0m21.236s
 user    0m0.046s
 sys     0m0.015s
+
+crawling speed can vary a lot without modifying the code in any way?? I was sitting in the same spot, and 20 minutes ago it took 50 seconds to crawl something, now it's 20. Same amount of pages and exact same pages/links
