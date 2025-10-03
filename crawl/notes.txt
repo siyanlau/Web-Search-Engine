@@ -27,4 +27,4 @@ I'm still not happy with the robot bottleneck. My crawler spends at least half o
 when in reality this is not necessary, because most of these URLs won't be visited anyways. We can just put all URLs on the PQ, and check on-the-go when a URL is picked. If it violates robots policy, just ignore it.
 
 Original Performance:  time=2m56.622s
-After Improvement: time=2m56.622s
+After Improvement: time=1m24.391s
