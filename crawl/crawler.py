@@ -76,37 +76,31 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
         body = res["body"]
 
         # --- State + logging critical section ---
+        ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        size_bytes = len(body) if body else 0
+        domain = get_domain(final_url)
+        superdomain = get_superdomain(final_url)
+
         with state_lock:
             if final_url in visited:
                 print(f"[SKIP DUP] {final_url}")
                 continue
-
-            ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-            size_bytes = len(body) if body else 0
-            domain = get_domain(final_url)
-            superdomain = get_superdomain(final_url)
 
             domain_before = pages_per_domain.get(domain, 0)
             super_before = pages_per_superdomain.get(superdomain, 0)
 
             page_score, super_score, total_priority = _compute_priority(domain_before, super_before)
 
-            writer.writerow([
-                ts_iso, final_url, status, depth, size_bytes,
-                domain, superdomain,
-                domain_before, super_before,
-                f"{page_score:.3f}", f"{super_score:.3f}", f"{total_priority:.3f}",
-                f"{prio_at_pop:.3f}"
-            ])
+            writer.writerow([...])
             fetched_state[0] += 1
-
-            print(f"[FETCH] [W{worker_id}] {status} {final_url} depth={depth} bytes={size_bytes} "
-                  f"domain={domain}({domain_before}) super={superdomain}({super_before}) "
-                  f"scores=({page_score:.3f},{super_score:.3f}) total={total_priority:.3f}")
-
             visited.add(final_url)
             pages_per_domain[domain] = domain_before + 1
             pages_per_superdomain[superdomain] = super_before + 1
+
+        print(f"[FETCH] [W{worker_id}] {status} {final_url} depth={depth} bytes={size_bytes} "
+            f"domain={domain}({domain_before}) super={superdomain}({super_before}) "
+            f"scores=({page_score:.3f},{super_score:.3f}) total={total_priority:.3f}")
+
 
         # --- Skip children if body/status/depth not suitable ---
         if (not body) or (depth >= max_depth) or (status >= 400):
