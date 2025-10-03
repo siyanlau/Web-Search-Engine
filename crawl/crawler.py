@@ -30,6 +30,7 @@ NUM_WORKERS = 32   # number of threads to run
 def _looks_binary_by_suffix(url: str) -> bool:
     path = urlparse(url).path.lower()
     return any(path.endswith(ext) for ext in BINARY_SUFFIXES)
+# note that MIME type check is done in fetch.py, not here
 
 def _compute_priority(domain_before: int, super_before: int, super_w: float = SUPERDOMAIN_WEIGHT):
     page_score = 1.0 / math.log2(2.0 + float(domain_before))

@@ -40,7 +40,8 @@ def fetch_url(url, timeout, ua):
 
             # content-type check
             ctype = resp.headers.get("Content-Type", "").lower()
-            if "text/html" not in ctype:
+            if "text/html" not in ctype: # check MIME type
+                print(f"[SKIP MIME] {url} content-type={ctype}")
                 body = None
             else:
                 body = raw
