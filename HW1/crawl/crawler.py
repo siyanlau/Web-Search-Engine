@@ -25,6 +25,8 @@ SUPERDOMAIN_WEIGHT = 0.1
 MAX_KEEP = 100
 OVERSAMPLE = 200
 NUM_WORKERS = 32   # number of threads to run
+FRONTIER_CAP = 10000
+FRONTIER_KEEP = 2000
 # =========================
 
 def _looks_binary_by_suffix(url: str) -> bool:
@@ -44,8 +46,8 @@ state_lock = threading.Lock()
 
 # === Worker function (multi-threaded, lazy robots) ===
 def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_per_superdomain,
-           robots, writer, max_pages, max_depth, timeout, ua, fetched_state):
-
+           robots, writer, max_pages, max_depth, timeout, ua, fetched_state,
+           total_bytes, error_counts):  # [ADDED] new shared stats
     seq = 0
 
     while True:
@@ -74,6 +76,11 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
         final_url = res["final_url"]
         status = res["status"]
         body = res["body"]
+        
+        try:
+            status = int(status)
+        except Exception:
+            status = 0
 
         # --- State + logging critical section ---
         ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -91,11 +98,23 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
 
             page_score, super_score, total_priority = _compute_priority(domain_before, super_before)
 
-            writer.writerow([...])
+            writer.writerow([
+                ts_iso, final_url, status, depth, size_bytes,
+                domain, superdomain,
+                domain_before, super_before,
+                f"{page_score:.3f}", f"{super_score:.3f}", f"{total_priority:.3f}",
+                f"{prio_at_pop:.3f}"
+            ])
             fetched_state[0] += 1
             visited.add(final_url)
             pages_per_domain[domain] = domain_before + 1
             pages_per_superdomain[superdomain] = super_before + 1
+
+            # [ADDED] bump shared stats
+            # Count total bytes fetched and error statuses for end-of-run console summary
+            total_bytes[0] += size_bytes
+            if status >= 400:
+                error_counts[status] = error_counts.get(status, 0) + 1
 
         print(f"[FETCH] [W{worker_id}] {status} {final_url} depth={depth} bytes={size_bytes} "
             f"domain={domain}({domain_before}) super={superdomain}({super_before}) "
@@ -159,6 +178,13 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
                             if accepted >= MAX_KEEP:
                                 break
                 print(f"[ENQUEUE] [W{worker_id}] accepted={accepted}, frontier_size={len(frontier)}")
+            
+            # if PQ blows up in size, we trim it down
+            if len(frontier) > FRONTIER_CAP:
+                # Keep only the top 2000 items by priority
+                frontier[:] = heapq.nsmallest(FRONTIER_KEEP, frontier, key=lambda x: x[0])
+                heapq.heapify(frontier)
+                print(f"[FRONTIER CAP] trimmed to {FRONTIER_KEEP}, new frontier_size={len(frontier)}")
 
         except Exception as e:
             print(f"[PARSE ERROR] [W{worker_id}] {e}")
@@ -173,6 +199,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     robots = RobotCache(user_agent=ua, timeout=timeout)
 
     frontier = []
+    
     seq = 0
     for s in seeds:
         s = (s or "").strip()
@@ -205,6 +232,9 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     ])
 
     fetched_state = [0]  # mutable wrapper to share count
+    total_bytes = [0]    # [ADDED] total bytes across all pages
+    error_counts = {}    # [ADDED] status>=400 tallies
+    start_time = time.time()  # [ADDED] for elapsed seconds
 
     try:
         threads = []
@@ -215,12 +245,26 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
                 pages_per_domain, pages_per_superdomain,
                 robots, writer,
                 max_pages, max_depth, timeout, ua,
-                fetched_state
+                fetched_state,
+                total_bytes, error_counts  # [ADDED]
             ))
             t.start()
             threads.append(t)
 
         for t in threads:
             t.join()
+
+        # [ADDED] Console summary (not written to CSV)
+        elapsed = time.time() - start_time
+        print("\n---- SUMMARY ----")
+        print(f"Pages crawled:       {fetched_state[0]}")
+        print(f"Elapsed seconds:     {elapsed:.2f}")
+        print(f"Total bytes:         {total_bytes[0]}")
+        print(f"Unique domains:      {len(pages_per_domain)}")
+        print(f"Unique superdomains: {len(pages_per_superdomain)}")
+        if error_counts:
+            for code in sorted(error_counts):
+                print(f"HTTP {code} errors:   {error_counts[code]}")
+
     finally:
         outfh.close()

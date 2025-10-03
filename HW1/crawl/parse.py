@@ -1,13 +1,13 @@
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urldefrag, urlparse, urlunparse, parse_qsl, urlencode
 
-def canonicalize_url(url: str) -> str:
+def canonicalize_url(url: str) -> str: 
     """
     Normalize URLs to reduce duplicates.
     - Lowercase scheme and host
     - Remove fragments
     - Remove default ports (:80 for http, :443 for https)
-    - Strip common tracking query params (utm_*, fbclid, gclid)
+    - Strip common tracking query params (utm_*, fbclid, gclid) 
     - Sort query parameters
     - Collapse trailing slash for root
     """
@@ -49,7 +49,7 @@ def canonicalize_url(url: str) -> str:
     # Collapse root path slash
     path = parsed.path or ""
     if path == "/":
-        path = ""
+        path = "" 
         
     rebuilt = urlunparse((scheme, netloc, path, "", clean_query, ""))
     return rebuilt
