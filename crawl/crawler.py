@@ -5,6 +5,9 @@ from urllib.parse import urldefrag, urlparse
 from .fetch import fetch_url
 from .parse import LinkExtractor
 from .robots import RobotCache
+from .helpers import get_domain, get_superdomain
+
+import math
 
 # suffix blacklist (for enqueue-time gating)
 BINARY_SUFFIXES = (
@@ -35,9 +38,19 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
         else:
             print(f"[SEED SKIP] robots disallow {s}")
 
+    # counters for v0.3
+    pages_per_domain = {}
+    pages_per_superdomain = {}
+
     outfh = open(out_csv, "w", newline="", encoding="utf-8")
     writer = csv.writer(outfh)
-    writer.writerow(["ts_iso", "url", "status", "depth", "bytes"])
+    # extended header: add domain_count_before, super_count_before
+    writer.writerow([
+        "ts_iso", "url", "status", "depth", "bytes",
+        "domain", "superdomain",
+        "domain_count_before", "super_count_before",
+        "page_score", "super_score", "total_priority"
+    ])
 
     fetched = 0
     try:
@@ -47,26 +60,53 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
             final_url = res["final_url"]
             status = res["status"]
             body = res["body"]
+            
+            # Early bailout if visited
+            if final_url in visited:
+                print(f"[SKIP DUP] {final_url}")
+                continue
 
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             size_bytes = len(body) if body else 0
-            writer.writerow([ts_iso, final_url, status, depth, size_bytes])
+            domain = get_domain(final_url)
+            superdomain = get_superdomain(final_url)
+
+            # counts BEFORE this visit (unique-page counts)
+            domain_before = pages_per_domain.get(domain, 0)
+            super_before = pages_per_superdomain.get(superdomain, 0)
+            
+            # compute scores
+            page_score = 1.0 / math.log2(1 + (domain_before + 1))
+            super_score = 0.1 / math.log2(1 + (super_before + 1))
+            total_priority = page_score + super_score
+
+            # log row includes counts + scores
+            writer.writerow([
+                ts_iso, final_url, status, depth, size_bytes,
+                domain, superdomain,
+                domain_before, super_before,
+                f"{page_score:.3f}", f"{super_score:.3f}", f"{total_priority:.3f}"
+            ])
             fetched += 1
 
             print(f"[FETCH] {status} {final_url} depth={depth}")
 
-            if final_url in visited:
-                continue
+            # mark visited and increment unique counters
             visited.add(final_url)
+            pages_per_domain[domain] = domain_before + 1
+            pages_per_superdomain[superdomain] = super_before + 1
 
-            if not body or depth >= max_depth:
+            # Only parse children if (a) body exists, (b) depth < max_depth, (c) status is 200
+            # I want to keep 40x pages in the log cuz I get to know what exactly is getting crawled
+            # However I don't want the CHILDREN of those error pages to be added to the queue
+            if not body or depth >= max_depth or status >= 400:
                 continue
 
             # parse + enqueue
             try:
                 parser = LinkExtractor(final_url)
                 text = body.decode("utf-8", errors="replace")
-                print(f"[DEBUG] first 200 chars of body:\n{text[:200]!r}")
+                # print(f"[DEBUG] first 200 chars of body:\n{text[:200]!r}")
                 parser.feed(text)
                 links = parser.links
                 print(f"[PARSE] found {len(links)} links at {final_url}")
