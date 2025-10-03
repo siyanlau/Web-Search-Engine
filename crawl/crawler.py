@@ -18,11 +18,18 @@ BINARY_SUFFIXES = (
     ".css", ".js", ".woff", ".woff2", ".ttf", ".eot"
 )
 
+# Frontier scoring weight for superdomains
+SUPERDOMAIN_WEIGHT = 0.1
+
+# Link sampling / cap per page
+MAX_KEEP = 100
+OVERSAMPLE = 200
+
 def _looks_binary_by_suffix(url: str) -> bool:
     path = urlparse(url).path.lower()
     return any(path.endswith(ext) for ext in BINARY_SUFFIXES)
 
-def _compute_priority(domain_before: int, super_before: int, super_w: float = 0.1):
+def _compute_priority(domain_before: int, super_before: int, super_w: float = SUPERDOMAIN_WEIGHT):
     """
     Priority formula (higher = better).
     page_score   = 1 / log2(2 + domain_before)
@@ -121,7 +128,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
             pages_per_superdomain[superdomain] = super_before + 1
 
             # Only parse children if status is normal and body exists and depth < max_depth
-            if (not body) or (depth >= max_depth) or (status > 400):
+            if (not body) or (depth >= max_depth) or (status >= 400):
                 continue
 
             try:
@@ -133,11 +140,9 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
                 print(f"[PARSE] found {len(links)} links at {final_url}")
 
                 # Step 1: oversample + cap
-                max_keep = 100
-                oversample = 200
                 original_n = len(links)
-                if original_n > max_keep:
-                    sample_idx = random.sample(range(original_n), min(oversample, original_n))
+                if original_n > MAX_KEEP:
+                    sample_idx = random.sample(range(original_n), min(OVERSAMPLE, original_n))
                     links = [links[i] for i in sample_idx]
                     print(f"[CAP] page had {original_n} links → sampled {len(links)} candidates")
 
@@ -167,7 +172,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
                     seq += 1
                     accepted += 1
                     # print(f"[PUSH] depth={depth+1} prio={tp:.3f} {child}")
-                    if accepted >= max_keep:
+                    if accepted >= MAX_KEEP:
                         break
 
                 print(f"[ENQUEUE] accepted={accepted}, frontier_size={len(frontier)}")
