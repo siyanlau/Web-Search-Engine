@@ -9,3 +9,7 @@ user    0m0.046s
 sys     0m0.015s
 
 crawling speed can vary a lot without modifying the code in any way?? I was sitting in the same spot, and 20 minutes ago it took 50 seconds to crawl something, now it's 20. Same amount of pages and exact same pages/links
+
+Note on priority scores:
+The total_priority values logged for each URL are computed at visit time. Since domain and superdomain counters increase as the crawl progresses, and some URLs redirect to different domains, these logged scores may differ from the priority used when the URL was originally selected from the frontier. This is expected behavior and does not indicate a bug — the priority queue always ensures that the crawler pops the highest-scoring URL available at the time of selection.
+this phenomenon (priority at processing time is smaller than pre-pop) actually ensures a rough BFS order.
