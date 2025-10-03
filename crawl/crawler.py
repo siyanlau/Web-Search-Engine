@@ -3,6 +3,7 @@ import time
 import random
 import math
 import heapq
+import threading
 from urllib.parse import urldefrag, urlparse
 
 from .fetch import fetch_url
@@ -23,6 +24,7 @@ BINARY_SUFFIXES = (
 SUPERDOMAIN_WEIGHT = 0.1
 MAX_KEEP = 100
 OVERSAMPLE = 200
+NUM_WORKERS = 32   # number of threads to run
 # =========================
 
 def _looks_binary_by_suffix(url: str) -> bool:
@@ -35,106 +37,125 @@ def _compute_priority(domain_before: int, super_before: int, super_w: float = SU
     total_priority = page_score + super_score
     return page_score, super_score, total_priority
 
-# === Worker function (single-threaded for Step A) ===
-def worker(frontier, visited, in_frontier, pages_per_domain, pages_per_superdomain,
+# Locks for multithreading
+frontier_lock = threading.Lock()
+state_lock = threading.Lock()
+
+# === Worker function (multi-threaded for Step B) ===
+def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_per_superdomain,
            robots, writer, max_pages, max_depth, timeout, ua, fetched_state):
 
-    fetched = 0
     seq = 0
 
-    while frontier and fetched_state[0] < max_pages:
-        neg_prio, depth, _, url, prio_at_pop = heapq.heappop(frontier)
-        print(f"[POP] selected_prio={prio_at_pop:.3f} url={url}")
-        in_frontier.discard(url)
+    while True:
+        # Try to grab a URL from the frontier
+        with frontier_lock:
+            if fetched_state[0] >= max_pages:
+                return
+            if not frontier:
+                # Nothing to do right now → give other threads time and retry
+                url = None
+            else:
+                neg_prio, depth, _, url, prio_at_pop = heapq.heappop(frontier)
+                print(f"[POP] [W{worker_id}] selected_prio={prio_at_pop:.3f} url={url}")
+                in_frontier.discard(url)
 
+        if url is None:
+            time.sleep(0.1)
+            continue  # retry loop
+
+        # --- Fetch outside lock ---
         res = fetch_url(url, timeout, ua)
         final_url = res["final_url"]
         status = res["status"]
         body = res["body"]
 
-        if final_url in visited:
-            print(f"[SKIP DUP] {final_url}")
-            continue
+        # --- State + logging critical section ---
+        with state_lock:
+            if final_url in visited:
+                print(f"[SKIP DUP] {final_url}")
+                continue
 
-        ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        size_bytes = len(body) if body else 0
-        domain = get_domain(final_url)
-        superdomain = get_superdomain(final_url)
+            ts_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            size_bytes = len(body) if body else 0
+            domain = get_domain(final_url)
+            superdomain = get_superdomain(final_url)
 
-        domain_before = pages_per_domain.get(domain, 0)
-        super_before = pages_per_superdomain.get(superdomain, 0)
+            domain_before = pages_per_domain.get(domain, 0)
+            super_before = pages_per_superdomain.get(superdomain, 0)
 
-        page_score, super_score, total_priority = _compute_priority(domain_before, super_before)
+            page_score, super_score, total_priority = _compute_priority(domain_before, super_before)
 
-        writer.writerow([
-            ts_iso, final_url, status, depth, size_bytes,
-            domain, superdomain,
-            domain_before, super_before,
-            f"{page_score:.3f}", f"{super_score:.3f}", f"{total_priority:.3f}",
-            f"{prio_at_pop:.3f}"
-        ])
-        fetched += 1
-        fetched_state[0] += 1
+            writer.writerow([
+                ts_iso, final_url, status, depth, size_bytes,
+                domain, superdomain,
+                domain_before, super_before,
+                f"{page_score:.3f}", f"{super_score:.3f}", f"{total_priority:.3f}",
+                f"{prio_at_pop:.3f}"
+            ])
+            fetched_state[0] += 1
 
-        print(f"[FETCH] {status} {final_url} depth={depth} bytes={size_bytes} "
-              f"domain={domain}({domain_before}) super={superdomain}({super_before}) "
-              f"scores=({page_score:.3f},{super_score:.3f}) total={total_priority:.3f}")
+            print(f"[FETCH] [W{worker_id}] {status} {final_url} depth={depth} bytes={size_bytes} "
+                  f"domain={domain}({domain_before}) super={superdomain}({super_before}) "
+                  f"scores=({page_score:.3f},{super_score:.3f}) total={total_priority:.3f}")
 
-        visited.add(final_url)
-        pages_per_domain[domain] = domain_before + 1
-        pages_per_superdomain[superdomain] = super_before + 1
+            visited.add(final_url)
+            pages_per_domain[domain] = domain_before + 1
+            pages_per_superdomain[superdomain] = super_before + 1
 
+        # --- Skip children if body/status/depth not suitable ---
         if (not body) or (depth >= max_depth) or (status >= 400):
             continue
 
+        # --- Parse and enqueue children ---
         try:
             parser = LinkExtractor(final_url)
             text = body.decode("utf-8", errors="replace")
-            # print(f"[DEBUG] first 200 chars of body:\n{text[:200]!r}")
             parser.feed(text)
             links = parser.links
-            print(f"[PARSE] found {len(links)} links at {final_url}")
+            print(f"[PARSE] [W{worker_id}] found {len(links)} links at {final_url}")
 
             # Step 1: oversample + cap
             original_n = len(links)
             if original_n > MAX_KEEP:
                 sample_idx = random.sample(range(original_n), min(OVERSAMPLE, original_n))
                 links = [links[i] for i in sample_idx]
-                print(f"[CAP] page had {original_n} links → sampled {len(links)} candidates")
+                print(f"[CAP] [W{worker_id}] page had {original_n} links → sampled {len(links)} candidates")
 
             # Step 2: suffix filter
             filtered = []
             for u in links:
                 if _looks_binary_by_suffix(u):
-                    print(f"[SKIP BIN] {u}")
+                    print(f"[SKIP BIN] [W{worker_id}] {u}")
                     continue
                 filtered.append(u)
-            
+
             # Step 3: robots + enqueue children with scores
             accepted = 0
-            for child in filtered:
-                if child in visited or child in in_frontier:
-                    continue
-                if not robots.can_fetch(child):
-                    print(f"[ROBOTS] disallow {child}")
-                    continue
-                cd = get_domain(child)
-                csd = get_superdomain(child)
-                cd_before = pages_per_domain.get(cd, 0)
-                csd_before = pages_per_superdomain.get(csd, 0)
-                _, _, tp = _compute_priority(cd_before, csd_before)
-                heapq.heappush(frontier, (-tp, depth + 1, seq, child, tp))
-                in_frontier.add(child)
-                seq += 1
-                accepted += 1
-                # print(f"[PUSH] depth={depth+1} prio={tp:.3f} {child}")
-                if accepted >= MAX_KEEP:
-                    break
+            with frontier_lock:
+                for child in filtered:
+                    if child in visited or child in in_frontier:
+                        continue
+                    if not robots.can_fetch(child):
+                        print(f"[ROBOTS] [W{worker_id}] disallow {child}")
+                        continue
+                    cd = get_domain(child)
+                    csd = get_superdomain(child)
+                    cd_before = pages_per_domain.get(cd, 0)
+                    csd_before = pages_per_superdomain.get(csd, 0)
+                    _, _, tp = _compute_priority(cd_before, csd_before)
+                    heapq.heappush(frontier, (-tp, depth + 1, seq, child, tp))
+                    in_frontier.add(child)
+                    seq += 1
+                    accepted += 1
+                    if accepted >= MAX_KEEP:
+                        break
 
-            print(f"[ENQUEUE] accepted={accepted}, frontier_size={len(frontier)}")
+            print(f"[ENQUEUE] [W{worker_id}] accepted={accepted}, frontier_size={len(frontier)}")
 
         except Exception as e:
-            print(f"[PARSE ERROR] {e}")
+            print(f"[PARSE ERROR] [W{worker_id}] {e}")
+
 
 def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     visited = set()
@@ -177,12 +198,22 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
     ])
 
     fetched_state = [0]  # mutable wrapper to share count
+
     try:
-        # Step A: just run worker in same thread
-        worker(frontier, visited, in_frontier,
-               pages_per_domain, pages_per_superdomain,
-               robots, writer,
-               max_pages, max_depth, timeout, ua,
-               fetched_state)
+        threads = []
+        for i in range(NUM_WORKERS):
+            t = threading.Thread(target=worker, args=(
+                i, 
+                frontier, visited, in_frontier,
+                pages_per_domain, pages_per_superdomain,
+                robots, writer,
+                max_pages, max_depth, timeout, ua,
+                fetched_state
+            ))
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
     finally:
         outfh.close()

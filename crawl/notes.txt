@@ -13,3 +13,12 @@ crawling speed can vary a lot without modifying the code in any way?? I was sitt
 Note on priority scores:
 The total_priority values logged for each URL are computed at visit time. Since domain and superdomain counters increase as the crawl progresses, and some URLs redirect to different domains, these logged scores may differ from the priority used when the URL was originally selected from the frontier. This is expected behavior and does not indicate a bug — the priority queue always ensures that the crawler pops the highest-scoring URL available at the time of selection.
 this phenomenon (priority at processing time is smaller than pre-pop) actually ensures a rough BFS order.
+
+Initial multithreading: robots check and enqueue are the bottlenecks. In the console, you'd see a single worker get stuck on ROBOTS or ENQUEUE tasks, whereas POP and FETCH tasks always moved quickly. 
+This is because the original design lets these operations hold down resource locks. The way to resolve it is to make critical sections as small as possible. 
+Because our algorithm is biased towards new domains, we actually have to do enqueue and robot checks a lot. So it's important to optimize the implementation for better performance. 
+
+
+Setting: depth=5, worker=32, page=1000
+Original Performance:  time=12m23.947s
+After Improvement: time= 
