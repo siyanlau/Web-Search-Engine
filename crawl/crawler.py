@@ -140,6 +140,9 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
             for child in filtered:
                 if child in visited or child in in_frontier:
                     continue
+                if "cgi" in child.lower():
+                    print(f"[SKIP CGI] [W{worker_id}] {child}") # Skip CGI scripts
+                    continue
                 cd = get_domain(child)
                 csd = get_superdomain(child)
                 cd_before = pages_per_domain.get(cd, 0)

@@ -8,7 +8,7 @@ def parse_args(argv):
     ap.add_argument("--out", default="crawl.csv", help="Output CSV path")
     ap.add_argument("--max-pages", type=int, default=50, help="Max number of fetch attempts")
     ap.add_argument("--max-depth", type=int, default=1, help="Max BFS depth to enqueue")
-    ap.add_argument("--timeout", type=float, default=5.0, help="HTTP timeout seconds")
+    ap.add_argument("--timeout", type=float, default=3.0, help="HTTP timeout seconds")
     ap.add_argument("--user-agent", default="MiniCrawler/0.2-status", help="User-Agent header")
     return ap.parse_args(argv)
 
