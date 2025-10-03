@@ -41,7 +41,7 @@ def _compute_priority(domain_before: int, super_before: int, super_w: float = SU
 frontier_lock = threading.Lock()
 state_lock = threading.Lock()
 
-# === Worker function (multi-threaded for Step B) ===
+# === Worker function (multi-threaded, lazy robots) ===
 def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_per_superdomain,
            robots, writer, max_pages, max_depth, timeout, ua, fetched_state):
 
@@ -62,6 +62,11 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
         if url is None:
             time.sleep(0.1)
             continue  # retry loop
+
+        # --- Lazy robots check here ---
+        if not robots.can_fetch(url):
+            print(f"[ROBOTS-LAZY] [W{worker_id}] disallow {url}")
+            continue
 
         # --- Fetch outside lock ---
         res = fetch_url(url, timeout, ua)
@@ -129,20 +134,17 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
                     continue
                 filtered.append(u)
 
-            # Step 3: robots check OUTSIDE lock
+            # Step 3: enqueue children without robots check (lazy)
             to_enqueue = []
             for child in filtered:
                 if child in visited or child in in_frontier:
-                    continue
-                if not robots.can_fetch(child):
-                    print(f"[ROBOTS] [W{worker_id}] disallow {child}")
                     continue
                 cd = get_domain(child)
                 csd = get_superdomain(child)
                 cd_before = pages_per_domain.get(cd, 0)
                 csd_before = pages_per_superdomain.get(csd, 0)
                 _, _, tp = _compute_priority(cd_before, csd_before)
-                to_enqueue.append(( -tp, depth + 1, seq, child, tp ))
+                to_enqueue.append((-tp, depth + 1, seq, child, tp))
                 seq += 1
 
             # Step 4: bulk push inside lock
@@ -178,7 +180,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
         if not s:
             continue
         s, _ = urldefrag(s)
-        if not robots.can_fetch(s):
+        if not robots.can_fetch(s):  # still check seeds upfront
             print(f"[SEED SKIP] robots disallow {s}")
             continue
         if s in visited or s in in_frontier:
