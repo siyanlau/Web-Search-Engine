@@ -1,7 +1,8 @@
-subset_size = 1000
-with open("collection.tsv", "r", encoding="utf8") as fin, \
-     open("data/marco_subset.tsv", "w", encoding="utf8") as fout:
-    for i, line in enumerate(fin):
-        if i >= subset_size:
+from ftfy import fix_text
+
+with open("data/marco_tiny.tsv", "r", encoding="utf8") as f:
+    for i, line in enumerate(f):
+        text = fix_text(line)
+        print(text)
+        if i >= 10:
             break
-        fout.write(line)
