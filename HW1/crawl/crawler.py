@@ -34,10 +34,12 @@ def _looks_binary_by_suffix(url: str) -> bool:
     return any(path.endswith(ext) for ext in BINARY_SUFFIXES)
 # note that MIME type check is done in fetch.py, not here
 
-def _compute_priority(domain_before: int, super_before: int, super_w: float = SUPERDOMAIN_WEIGHT):
+def _compute_priority(domain_before, super_before, depth,
+                      super_w=SUPERDOMAIN_WEIGHT, depth_w=1.0):
     page_score = 1.0 / math.log2(2.0 + float(domain_before))
     super_score = super_w / math.log2(2.0 + float(super_before))
-    total_priority = page_score + super_score
+    depth_score = depth_w / (1.0 + depth)
+    total_priority = page_score + super_score + depth_score
     return page_score, super_score, total_priority
 
 # Locks for multithreading
@@ -96,7 +98,7 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
             domain_before = pages_per_domain.get(domain, 0)
             super_before = pages_per_superdomain.get(superdomain, 0)
 
-            page_score, super_score, total_priority = _compute_priority(domain_before, super_before)
+            page_score, super_score, total_priority = _compute_priority(domain_before, super_before, depth)
 
             writer.writerow([
                 ts_iso, final_url, status, depth, size_bytes,
@@ -161,7 +163,7 @@ def worker(worker_id, frontier, visited, in_frontier, pages_per_domain, pages_pe
                 csd = get_superdomain(child)
                 cd_before = pages_per_domain.get(cd, 0)
                 csd_before = pages_per_superdomain.get(csd, 0)
-                _, _, tp = _compute_priority(cd_before, csd_before)
+                _, _, tp = _compute_priority(cd_before, csd_before, depth+1)
                 to_enqueue.append((-tp, depth + 1, seq, child, tp))
                 seq += 1
 
@@ -215,7 +217,7 @@ def crawl(seeds, out_csv, max_pages, max_depth, timeout, ua):
         sd = get_superdomain(s)
         d_before = pages_per_domain.get(d, 0)
         sd_before = pages_per_superdomain.get(sd, 0)
-        _, _, prio = _compute_priority(d_before, sd_before)
+        _, _, prio = _compute_priority(d_before, sd_before, 0) # current depth is 0
         heapq.heappush(frontier, (-prio, 0, seq, s, prio))
         in_frontier.add(s)
         print(f"[SEED] push depth=0 prio={prio:.3f} {s}")
