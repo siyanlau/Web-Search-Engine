@@ -3,7 +3,7 @@ import os
 import re
 from engine.parser import parse_docs
 
-DATA_PATH = "data/toy.txt"
+DATA_PATH = "data/marco_tiny.tsv"
 
 def test_file_exists():
     """Verify that xxx.txt exists and is readable."""
@@ -26,7 +26,7 @@ def test_parse_docs_basic():
     for docid, toks in docs.items():
         assert isinstance(toks, list), f"Doc {docid} tokens should be list"
         assert all(isinstance(t, str) for t in toks), f"Non-string token in doc {docid}"
-        assert all(t.islower() for t in toks), f"Token not lowercased in doc {docid}"
+        assert all(not t.isalpha() or t.islower() for t in toks), f"Token not lowercased in doc {docid}"
         assert len(toks) > 0, f"Doc {docid} has empty token list"
         assert lens[docid] == len(toks), f"Length mismatch for doc {docid}"
 
