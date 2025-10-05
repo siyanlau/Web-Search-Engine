@@ -43,7 +43,8 @@ def parse_docs(path: str, limit: int | None = None):
 
             docs[docid] = tokens
             doc_lengths[docid] = len(tokens)
-
+    print(f"Loaded {len(docs)} docs")
+    
     return docs, doc_lengths
 
 
