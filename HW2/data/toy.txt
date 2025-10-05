@@ -1,0 +1,10 @@
+0   Apples are rich in fiber and vitamin C, and they are often eaten raw or used in pies and juice.
+1   Python is a popular programming language that emphasizes readability and rapid development.
+2   The capital of France is Paris, which is known for its art, fashion, and gastronomy.
+3   The process of photosynthesis converts light energy into chemical energy in plants.
+4   The Great Wall of China was built to protect Chinese states from northern invasions.
+5   Coffee contains caffeine, a natural stimulant that can improve alertness and concentration.
+6   The Pacific Ocean is the largest and deepest of Earth's oceanic divisions.
+7   Machine learning allows computers to learn from data without being explicitly programmed.
+8   Bananas grow in tropical regions and are an important source of potassium.
+9   The human brain consists of billions of neurons that transmit information through electrical signals.
