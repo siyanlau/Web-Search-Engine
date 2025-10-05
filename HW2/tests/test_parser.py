@@ -6,7 +6,7 @@ from engine.parser import parse_docs
 DATA_PATH = "data/toy.txt"
 
 def test_file_exists():
-    """Verify that toy.txt exists and is readable."""
+    """Verify that xxx.txt exists and is readable."""
     assert os.path.exists(DATA_PATH), f"{DATA_PATH} not found"
     with open(DATA_PATH, "r", encoding="utf8") as f:
         first_line = f.readline()
