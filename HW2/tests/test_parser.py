@@ -1,7 +1,7 @@
 # tests/test_parser.py
 import os
 import re
-from engine.parser import parse_docs
+from engine.parser import Parser
 
 DATA_PATH = "data/marco_tiny.tsv"
 
@@ -12,10 +12,10 @@ def test_file_exists():
         first_line = f.readline()
         assert first_line.strip(), "File is empty or unreadable"
 
-
 def test_parse_docs_basic():
     """Basic sanity check: should load >=1 doc, each with non-empty tokens."""
-    docs, lens = parse_docs(DATA_PATH)
+    parser = Parser()
+    docs, lens = parser.parse_docs(DATA_PATH)
     assert len(docs) > 0, "No documents loaded"
     assert len(lens) == len(docs), "doc_lengths size mismatch"
 
@@ -31,9 +31,10 @@ def test_parse_docs_basic():
         assert lens[docid] == len(toks), f"Length mismatch for doc {docid}"
 
 def test_tokenization_pattern():
-    """Tokens should contain only a-z or digits."""
-    docs, _ = parse_docs(DATA_PATH)
-    pattern = re.compile(r"^[a-z0-9]+$")
+    """Tokens should contain only a-z, digits, dot, or dash."""
+    parser = Parser()
+    docs, _ = parser.parse_docs(DATA_PATH)
+    pattern = re.compile(r"^[a-z0-9][a-z0-9.-]*[a-z0-9]$|^[a-z0-9]$")  # 允许 a-z0-9 . -
     for docid, toks in docs.items():
         for t in toks:
             assert pattern.match(t), f"Invalid token '{t}' in doc {docid}"
