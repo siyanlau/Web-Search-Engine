@@ -1,6 +1,8 @@
 import re
 import html
 from ftfy import fix_text
+from engine.utils import write_doc_lengths
+from engine.paths import DOC_LENGTHS_PATH
 
 class Parser:
     """
@@ -52,12 +54,16 @@ class Parser:
                 docs[docid] = tokens
                 doc_lengths[docid] = len(tokens)
         print(f"Loaded {len(docs)} docs")
+        
+        # now we have each document's length, and it's not gonna change, we write it to disk
+        # may need to modify (inplement compression, though i doubt this will be a bottleneck)
+        write_doc_lengths(doc_lengths, DOC_LENGTHS_PATH)
 
         return docs, doc_lengths
 
 
 if __name__ == "__main__":
     parser = Parser()
-    docs, lens = parser.parse_docs("data/toy.txt")
-    for docid, toks in list(docs.items()):
+    docs, lens = parser.parse_docs("data/marco_tiny.tsv")
+    for docid, toks in list(docs.items())[:10]:
         print(docid, toks)
