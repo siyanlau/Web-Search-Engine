@@ -38,3 +38,18 @@ user    0m0.061s
 sys     0m0.108s
 
 
+
+
+
+$ time python -m bench_search
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+Mode=BM25  Queries=200  avg=0.03ms  p50=0.02ms  p95=0.04ms  max=1.37ms
+
+real    0m0.358s
+user    0m0.061s
+sys     0m0.062s
+
+
+
