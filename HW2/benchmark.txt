@@ -1,0 +1,22 @@
+$ time python -m engine.parser
+Loaded 30000 docs
+Doc lengths saved to data\doc_lengths.pkl
+real    0m4.352s
+user    0m0.061s
+sys     0m0.061s
+
+
+$ time python -m engine.indexer
+Loaded 30000 docs
+Doc lengths saved to data\doc_lengths.pkl
+Inverted index saved to data\intermediate_index.pkl
+Indexer: index saved to data\intermediate_index.pkl
+Inverted index loaded from data\intermediate_index.pkl
+Indexer: index loaded from data\intermediate_index.pkl
+Sample postings for 'communication': [(0, 1), (425, 2), (681, 1), (686, 1), (2262, 1)]
+
+real    0m6.485s
+user    0m0.076s
+sys     0m0.046s
+
+
