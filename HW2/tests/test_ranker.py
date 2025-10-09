@@ -3,7 +3,7 @@ from engine.parser import Parser
 from engine.indexer import Indexer
 from engine.searcher import Searcher
 
-DATA_PATH = "data/toy.txt"
+DATA_PATH = "data/marco_tiny.tsv"
 
 @pytest.fixture(scope="module")
 def setup_engine():
