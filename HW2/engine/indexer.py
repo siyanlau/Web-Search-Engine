@@ -1,67 +1,100 @@
+"""
+engine/indexer.py
+
+Builds an inverted index from parsed documents and writes it to disk
+in *blocked binary format* (v0.4). This replaces the earlier pickle-based
+index for scalability and I/O efficiency.
+
+Output files:
+    - index.postings : binary file storing blocked posting lists
+    - index.lexicon  : term -> metadata (offset, df, nblocks)
+    - doc_lengths.pkl: document length mapping (written by parser)
+"""
+
 from collections import defaultdict
-from engine.paths import INDEX_PATH, MARCO_TSV_PATH
-from engine.utils import write_index, load_index  # single source of truth for IO
+from engine.paths import POSTINGS_PATH, LEXICON_PATH, MARCO_TSV_PATH
+from engine.listio import ListWriter
+from engine.lexicon import Lexicon
 
 
 class Indexer:
     """
-    Inverted index builder.
-    Maintains an in-memory term -> {docid: freq} mapping.
+    In-memory inverted index builder.
+    Maintains a temporary dictionary mapping:
+        term -> {docid: term_frequency}
+
+    After building, use save_to_disk() to serialize the index into
+    a blocked on-disk format with a corresponding lexicon file.
     """
 
     def __init__(self):
+        # Defaultdict nesting ensures new docid keys auto-initialize to 0
         self.index = defaultdict(lambda: defaultdict(int))
 
-    def build_inverted_index(self, docs):
+    def build_inverted_index(self, docs: dict[int, list[str]]):
         """
-        Given docs: dict[int, list[str]],
-        build an inverted index: term -> {docid: freq}
+        Construct an inverted index from tokenized documents.
+
+        Args:
+            docs: dict mapping docID -> list of tokens
+
+        Returns:
+            dict[str, dict[int, int]] : term -> {docid: frequency}
         """
         for docid, tokens in docs.items():
             for t in tokens:
                 self.index[t][docid] += 1
-        return self.index 
+        return self.index
 
-    def get_postings(self, term):
+    def get_postings(self, term: str):
         """
-        Returns posting list for a given term as dict {docid: freq}.
+        Retrieve the posting list for a given term from in-memory index.
+        Returns an empty dict if term not found.
         """
         return self.index.get(term, {})
-    
-    def save_to_disk(self, path: str = INDEX_PATH):
+
+    def save_to_disk(self):
         """
-        Persist the current inverted index to disk.
-        Delegates to engine.utils to keep IO concerns centralized.
+        Serialize the current in-memory index to disk in blocked binary format.
+
+        For each term:
+            - Writes its postings (sorted by docid) into index.postings in blocks
+            - Records its offset, document frequency, and number of blocks
+              into index.lexicon
+
+        Files written:
+            - POSTINGS_PATH (binary)
+            - LEXICON_PATH (pickle)
         """
-        # Convert nested defaultdicts to plain dicts for portability
-        data = {term: dict(postings) for term, postings in self.index.items()}
-        write_index(data, path)
-        print(f"Indexer: index saved to {path}")
-        
-        
-    @classmethod
-    def load_from_disk(cls, path: str = INDEX_PATH):
-        """
-        Load an inverted index from disk and return a ready-to-use Indexer.
-        Delegates file IO to engine.utils.
-        """
-        data = load_index(path)  # data: dict[str, dict[int,int]]
-        idx = cls()
-        # Restore nested defaultdict structure
-        idx.index = defaultdict(lambda: defaultdict(int), {
-            term: defaultdict(int, postings) for term, postings in data.items()
-        })
-        print(f"Indexer: index loaded from {path}")
-        return idx
-        
+        writer = ListWriter(POSTINGS_PATH)
+        lex = Lexicon()
+
+        for term, postings in self.index.items():
+            entry = writer.add_term(term, postings)
+            lex.add(term, entry)
+
+        writer.close()
+        lex.save(LEXICON_PATH)
+        print(f"[Indexer] Wrote postings → {POSTINGS_PATH}")
+        print(f"[Indexer] Wrote lexicon  → {LEXICON_PATH}")
+
+
+# -------------------------------
+# Optional manual test / smoke run
+# -------------------------------
 if __name__ == "__main__":
-    # Minimal end-to-end smoke test (run from project root: `python -m engine.indexer`)
     from engine.parser import Parser
+    from engine.paths import MARCO_TSV_PATH
+
+    print("[Indexer] Building index from", MARCO_TSV_PATH)
     parser = Parser()
-    docs, _ = parser.parse_docs(MARCO_TSV_PATH, limit=1000)
+    docs, _ = parser.parse_docs(MARCO_TSV_PATH, limit=30000)
+
     indexer = Indexer()
     indexer.build_inverted_index(docs)
-    indexer.save_to_disk(INDEX_PATH)
+    indexer.save_to_disk()
 
-    loaded = Indexer.load_from_disk(INDEX_PATH)
-    print("Sample postings for 'communication':", list(loaded.get_postings("communication").items())[:5])
+    # Quick sanity check: print one term’s postings length
+    sample_term = "communication"
+    postings = indexer.get_postings(sample_term)
+    print(f"Sample postings for '{sample_term}': {len(postings)} docs")

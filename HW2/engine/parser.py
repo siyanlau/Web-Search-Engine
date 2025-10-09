@@ -64,6 +64,6 @@ class Parser:
 
 if __name__ == "__main__":
     parser = Parser()
-    docs, lens = parser.parse_docs("data/marco_tiny.tsv")
+    docs, lens = parser.parse_docs("data/marco_small.tsv")
     for docid, toks in list(docs.items())[:10]:
         print(docid, toks)
