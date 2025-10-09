@@ -20,3 +20,21 @@ user    0m0.076s
 sys     0m0.046s
 
 
+
+$ time python -m engine.searcher
+Lexicon loaded: 67130 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+=== Boolean mode sample ===
+Lexicon loaded: 67130 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+AND: [(29997, 19.91968378092275)]
+OR : [(244, 9.914205225791427), (2332, 13.847476522972126), (16190, 9.460681382319317), (26147, 9.305469102752186), (26150, 9.38243337270348)]
+
+=== BM25 sample (top 10) ===
+29997 19.92
+
+real    0m0.344s
+user    0m0.061s
+sys     0m0.108s
+
+
