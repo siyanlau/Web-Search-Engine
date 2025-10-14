@@ -124,17 +124,101 @@ class Searcher:
             raise ValueError("mode must be AND or OR")
 
 
+# if __name__ == "__main__":
+#     # Run from project root:  python -m engine.searcher
+#     s = Searcher()  # uses default LEXICON_PATH / POSTINGS_PATH / DOC_LENGTHS_PATH if available
+
+#     print("=== Boolean mode sample ===")
+#     # Force boolean by constructing a Searcher without doc_lengths:
+#     s_bool = Searcher(doc_lengths=None)
+#     print("AND:", list(s_bool.search("overturned carriage", mode="AND"))[:5])
+#     print("OR :", list(sorted(s_bool.search("overturned carriage", mode="OR")))[:5])
+
+#     print("\n=== BM25 sample (top 10) ===")
+#     res = s.search("overturned carriage", topk=10)
+#     for docid, score in res:
+#         print(docid, round(score, 3))
+
+
 if __name__ == "__main__":
     # Run from project root:  python -m engine.searcher
-    s = Searcher()  # uses default LEXICON_PATH / POSTINGS_PATH / DOC_LENGTHS_PATH if available
+    import time
+    from engine.paths import LEXICON_PATH, POSTINGS_PATH, DOC_LENGTHS_PATH
+    from engine.lexicon import Lexicon
+    from engine.listio import ListReader
+    from engine.daat import PostingsCursor, boolean_and_daat, boolean_or_daat
 
-    print("=== Boolean mode sample ===")
-    # Force boolean by constructing a Searcher without doc_lengths:
-    s_bool = Searcher(doc_lengths=None)
-    print("AND:", list(s_bool.search("overturned carriage", mode="AND"))[:5])
-    print("OR :", list(sorted(s_bool.search("overturned carriage", mode="OR")))[:5])
+    # Helper: normalize Searcher outputs to a set of docids
+    def to_docid_set(obj):
+        if isinstance(obj, set):
+            return obj
+        if isinstance(obj, list):
+            if not obj:
+                return set()
+            first = obj[0]
+            if isinstance(first, tuple) and len(first) == 2:  # [(docid, score)]
+                return {d for d, _ in obj}
+            if isinstance(first, int):  # [docid, ...]
+                return set(obj)
+        return set()
+
+    # Helper: DAAT boolean result (set of docids)
+    def daat_set(query: str, mode: str = "AND"):
+        lex = Lexicon.load(LEXICON_PATH).map
+        reader = ListReader(POSTINGS_PATH)
+        terms = [t for t in query.lower().split() if t in lex]
+        if not terms:
+            reader.close()
+            return set()
+        cursors = [PostingsCursor(reader, t, lex[t]) for t in terms]
+        if mode.upper() == "AND":
+            res = set(boolean_and_daat(cursors))
+        elif mode.upper() == "OR":
+            res = set(boolean_or_daat(cursors))
+        else:
+            reader.close()
+            raise ValueError("mode must be AND or OR")
+        reader.close()
+        return res
+
+    # Construct searchers
+    s_full = Searcher()               # BM25 enabled (loads doc_lengths)
+    s_bool = Searcher(doc_lengths=None)  # force boolean path
+
+    queries = [
+        "overturned carriage",
+        "communication policy",
+        "machine learning",
+        "u.s policy",
+        "3.14 math",
+    ]
+
+    print("=== Boolean vs DAAT (set equality & timing) ===")
+    for q in queries:
+        # Baseline boolean
+        t0 = time.perf_counter()
+        base_and = to_docid_set(s_bool.search(q, mode="AND"))
+        t1 = time.perf_counter()
+        base_or  = to_docid_set(s_bool.search(q, mode="OR"))
+        t2 = time.perf_counter()
+
+        # DAAT boolean
+        t3 = time.perf_counter()
+        daat_and = daat_set(q, mode="AND")
+        t4 = time.perf_counter()
+        daat_or  = daat_set(q, mode="OR")
+        t5 = time.perf_counter()
+
+        ok_and = (base_and == daat_and)
+        ok_or  = (base_or == daat_or)
+
+        print(f"\nQ: {q}")
+        print(f"  AND equal: {ok_and} | sizes: base={len(base_and)} daat={len(daat_and)} "
+              f"| time base={t1-t0:.4f}s daat={t4-t3:.4f}s")
+        print(f"  OR  equal: {ok_or}  | sizes: base={len(base_or)} daat={len(daat_or)}   "
+              f"| time base={t2-t1:.4f}s daat={t5-t3 - (t4-t3):.4f}s")
 
     print("\n=== BM25 sample (top 10) ===")
-    res = s.search("overturned carriage", topk=10)
+    res = s_full.search("manhattan project", topk=10)
     for docid, score in res:
         print(docid, round(score, 3))

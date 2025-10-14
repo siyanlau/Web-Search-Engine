@@ -53,3 +53,52 @@ sys     0m0.062s
 
 
 
+
+$ python -m engine.searcher
+Lexicon loaded: 67130 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+Lexicon loaded: 67130 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+=== Boolean vs DAAT (set equality & timing) ===
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+
+Q: overturned carriage
+  AND equal: True | sizes: base=1 daat=1 | time base=0.0016s daat=0.3191s
+  OR  equal: True  | sizes: base=6 daat=6   | time base=0.0012s daat=0.2361s
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+
+Q: communication policy
+  AND equal: True | sizes: base=0 daat=0 | time base=0.0004s daat=0.3274s
+  OR  equal: True  | sizes: base=221 daat=221   | time base=0.0010s daat=0.2459s
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+
+Q: machine learning
+  AND equal: True | sizes: base=0 daat=0 | time base=0.0002s daat=0.4023s
+  OR  equal: True  | sizes: base=188 daat=188   | time base=0.0009s daat=0.2580s
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+
+Q: u.s policy
+  AND equal: True | sizes: base=7 daat=7 | time base=0.0028s daat=0.2918s
+  OR  equal: True  | sizes: base=824 daat=824   | time base=0.0020s daat=0.3563s
+Lexicon loaded: 67130 terms from data/index.lexicon
+Lexicon loaded: 67130 terms from data/index.lexicon
+
+Q: 3.14 math
+  AND equal: True | sizes: base=27 daat=27 | time base=0.0006s daat=0.2070s
+  OR  equal: True  | sizes: base=27 daat=27   | time base=0.0004s daat=0.3017s
+
+=== BM25 sample (top 10) ===
+2 19.44
+7 15.259
+8 15.21
+3 14.556
+1 13.687
+5 13.092
+6 13.092
+9 12.979
+4 12.141
+0 11.948
