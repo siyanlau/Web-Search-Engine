@@ -4,6 +4,7 @@ from engine.listio import ListReader
 from engine.ranker import Ranker
 from engine.utils import load_doc_lengths
 from engine.paths import LEXICON_PATH, POSTINGS_PATH, DOC_LENGTHS_PATH
+from engine.daat import PostingsCursor, boolean_and_daat, boolean_or_daat
 
 class Searcher:
     """
@@ -71,7 +72,6 @@ class Searcher:
 
             # decide allowed docs by mode
             if mode == "AND":
-                # 若任一term无posting，交集为空，直接返回空
                 if not doc_sets:
                     return []
                 allowed = set.intersection(*doc_sets)
@@ -105,6 +105,21 @@ class Searcher:
             return set.intersection(*postings_sets)
         elif mode == "OR":
             return set.union(*postings_sets)
+        else:
+            raise ValueError("mode must be AND or OR")
+
+    def search_boolean_daat(self, query: str, mode: str = "AND"):
+        terms = [t for t in query.lower().split() if t in self.lexicon]  # self.lex is Lexicon.map
+        if not terms:
+            return set()
+        cursors = []
+        for t in terms:
+            entry = self.lexicon[t]
+            cursors.append(PostingsCursor(self.reader, t, entry))
+        if mode.upper() == "AND":
+            return set(boolean_and_daat(cursors))
+        elif mode.upper() == "OR":
+            return set(boolean_or_daat(cursors))
         else:
             raise ValueError("mode must be AND or OR")
 

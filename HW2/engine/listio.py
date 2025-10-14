@@ -23,7 +23,7 @@ class ListWriter:
         docids = sorted(postings.keys())
         freqs  = [postings[d] for d in docids]
 
-        start_offset = self.file.tell()
+        start_offset = self.file.tell() # where is my cursor within the file
         total_df = len(docids)
         blocks_meta = []   # NEW: per-block metadata for fast seek
 

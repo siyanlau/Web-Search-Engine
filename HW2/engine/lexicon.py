@@ -1,17 +1,29 @@
 """
 engine/lexicon.py
 
-Lexicon maps terms to their on-disk posting metadata.
+Lexicon maps each term to its on-disk postings metadata.
 
 Each entry is a small dict like:
     {
-        "offset": int,     # byte offset of the first block in index.postings
-        "df": int,         # document frequency (number of docs containing term)
-        "nblocks": int     # number of blocks for this term
+        "offset": int,        # byte offset of the first block in index.postings
+        "df": int,             # total document frequency (docs containing this term)
+        "nblocks": int,        # number of blocks for this term
+        "blocks": [            # optional: per-block directory (for fast seek)
+            {
+                "offset": int,       # byte offset of this block in postings file
+                "last_docid": int,   # last docid within this block
+                "doc_bytes": int,    # length of encoded docid segment
+                "freq_bytes": int    # length of encoded frequency segment
+            },
+            ...
+        ]
     }
 
-This structure allows the searcher to quickly locate the postings
-of any term in the binary postings file via ListReader.
+This structure enables:
+  - O(log B) random access via block directory
+  - efficient sequential streaming via ListReader.iter_blocks()
+
+Stored as a pickle file for simplicity.
 """
 
 import pickle
@@ -19,11 +31,10 @@ import pickle
 class Lexicon:
     """
     Persistent mapping from term -> on-disk posting metadata.
-    Stored as a pickle file for simplicity.
 
     Typical usage:
         lex = Lexicon()
-        lex.add("hello", {"offset": 1234, "df": 10, "nblocks": 2})
+        lex.add("hello", {"offset": 1234, "df": 10, "nblocks": 2, "blocks": [...]})
         lex.save("data/index.lexicon")
 
         # Later:
