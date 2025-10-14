@@ -47,17 +47,16 @@ def split_into_chunks(input_path, chunk_size=10000):
             paths.append(out)
     return paths
 
-def shift_docids(docs, base):
-    if base == 0:
-        return docs
-    return {docid + base: toks for docid, toks in docs.items()}
+# def shift_docids(docs, base):
+#     if base == 0:
+#         return docs
+#     return {docid + base: toks for docid, toks in docs.items()}
 
 def build_run_from_chunk(chunk_path, base_offset, run_path):
     parser = Parser()
     docs, lens = parser.parse_docs(chunk_path)
     # docs = shift_docids(docs, base_offset)
     # lens = {docid + base_offset: l for docid, l in lens.items()}
-
     indexer = Indexer()
     postings = indexer.build_inverted_index(docs)
 

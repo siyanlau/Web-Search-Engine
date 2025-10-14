@@ -24,7 +24,7 @@ class RunWriter:
 
     def write_from_index(self, postings: dict[str, dict[int, int]]):
         # Sort by term, then by docid
-        for term in sorted(postings.keys()):
+        for term in sorted(postings.keys()): # two step sort, reduce complexity
             plist = postings[term]
             for docid in sorted(plist.keys()):
                 tf = plist[docid]
