@@ -1,8 +1,8 @@
 import pickle
 import sys
 
-# python inspect_pickle.py data/intermediate_index.pkl
-# python inspect_pickle.py data/doc_lengths.pkl 5
+# python inspect_pickle data/intermediate_index.pkl
+# python inspect_pickle data/doc_lengths.pkl 5
 
 
 def inspect_pickle(path, limit=10):

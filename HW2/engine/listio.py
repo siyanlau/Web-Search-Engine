@@ -1,5 +1,6 @@
 import struct
 from collections import defaultdict
+from typing import Iterator, Tuple, List, Optional
 
 BLOCK_SIZE = 128  # adjustable
 
@@ -19,34 +20,49 @@ class ListWriter:
         self.offset = 0  # byte offset counter
 
     def add_term(self, term, postings):
-        """
-        Write postings for a single term.
-        postings: dict {docid: freq}
-        Returns summary: (offset, df, nblocks)
-        """
         docids = sorted(postings.keys())
-        freqs = [postings[d] for d in docids]
-        df = len(docids)
-        nblocks = 0
-        start_offset = self.offset
+        freqs  = [postings[d] for d in docids]
 
-        for i in range(0, df, self.block_size):
-            block_docids = docids[i:i + self.block_size]
-            block_freqs = freqs[i:i + self.block_size]
-            n = len(block_docids)
-            last_docid = block_docids[-1]
+        start_offset = self.file.tell()
+        total_df = len(docids)
+        blocks_meta = []   # NEW: per-block metadata for fast seek
 
-            # pack header
-            block = struct.pack("<II", n, last_docid)
-            # pack postings
-            block += struct.pack(f"<{n}I", *block_docids)
-            block += struct.pack(f"<{n}I", *block_freqs)
+        # chunk into blocks
+        for i in range(0, total_df, self.block_size):
+            chunk_docids = docids[i:i+self.block_size]
+            chunk_freqs  = freqs[i:i+self.block_size]
+            n = len(chunk_docids)
+            last_docid = chunk_docids[-1]
 
-            self.file.write(block)
-            nblocks += 1
-            self.offset += len(block)
+            # record offset of this block before writing
+            block_offset = self.file.tell()
 
-        return {"offset": start_offset, "df": df, "nblocks": nblocks}
+            # write header: <n:uint32, last_docid:uint32>
+            self.file.write(struct.pack("<II", n, last_docid))
+
+            # write docids and freqs as uint32 arrays (raw v0.4)
+            self.file.write(struct.pack(f"<{n}I", *chunk_docids))
+            self.file.write(struct.pack(f"<{n}I", *chunk_freqs))
+
+            # NEW: bytes written for docids/freqs (for future varbyte)
+            doc_bytes  = 4 * n
+            freq_bytes = 4 * n
+
+            blocks_meta.append({
+                "offset": block_offset,   # absolute file offset at block header
+                "n": n,
+                "last_docid": last_docid,
+                "doc_bytes": doc_bytes,
+                "freq_bytes": freq_bytes,
+            })
+
+        entry = {
+            "offset": start_offset,      # first block offset for this term
+            "df": total_df,
+            "nblocks": len(blocks_meta),
+            "blocks": blocks_meta,       # NEW: block directory
+        }
+        return entry
 
     def close(self):
         self.file.close()
@@ -78,3 +94,80 @@ class ListReader:
 
     def close(self):
         self.file.close()
+        
+    def iter_blocks(self, entry: dict) -> Iterator[Tuple[int, List[int], List[int]]]:
+        """
+        Yield blocks for this term one-by-one.
+        Each yield returns (last_docid, docids[], freqs[]).
+
+        If 'blocks' metadata is present in entry, use it (fast path).
+        Otherwise, fall back to linear scan using headers (compatible with older entries).
+        """
+        df = entry["df"]
+        remaining = df
+
+        # fast path: use per-block directory if present
+        blocks = entry.get("blocks")
+        if blocks:
+            for b in blocks:
+                self.file.seek(b["offset"])
+                # read header to stay robust even if bytes change in the future
+                n, last_docid = struct.unpack("<II", self.file.read(8))
+                d = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+                f = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+                yield last_docid, d, f
+            return
+
+        # fallback: linear scan from the first offset
+        self.file.seek(entry["offset"])
+        while remaining > 0:
+            n, last_docid = struct.unpack("<II", self.file.read(8))
+            d = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            f = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            yield last_docid, d, f
+            remaining -= n
+
+    def seek_block_ge(self, entry: dict, target_docid: int):
+        """
+        Locate the first block whose last_docid >= target_docid.
+        Return a tuple (block_index, last_docid, docids[], freqs[]).
+        If not found, return None.
+
+        Uses the 'blocks' directory if present (binary search).
+        Falls back to linear scan otherwise.
+        """
+        blocks = entry.get("blocks")
+        if blocks:
+            # binary search on last_docid
+            lo, hi = 0, len(blocks) - 1
+            ans = None
+            while lo <= hi:
+                mid = (lo + hi) // 2
+                if blocks[mid]["last_docid"] >= target_docid:
+                    ans = mid
+                    hi = mid - 1
+                else:
+                    lo = mid + 1
+            if ans is None:
+                return None
+
+            b = blocks[ans]
+            self.file.seek(b["offset"])
+            n, last_docid = struct.unpack("<II", self.file.read(8))
+            d = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            f = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            return ans, last_docid, d, f
+
+        # fallback: linear scan (no blocks[] present)
+        self.file.seek(entry["offset"])
+        idx = 0
+        remaining = entry["df"]
+        while remaining > 0:
+            n, last_docid = struct.unpack("<II", self.file.read(8))
+            d = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            f = list(struct.unpack(f"<{n}I", self.file.read(4*n)))
+            if last_docid >= target_docid:
+                return idx, last_docid, d, f
+            remaining -= n
+            idx += 1
+        return None
