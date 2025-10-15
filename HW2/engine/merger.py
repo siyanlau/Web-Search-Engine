@@ -18,6 +18,78 @@ from engine.runio import RunReader
 from engine.listio import ListWriter
 from engine.lexicon import Lexicon
 
+def merge_runs_to_index(run_paths, postings_path, lexicon_path, block_size=128):
+    """
+    K-way merge over sorted TSV runs:
+      - inputs: list of run files (term, docid, tf) sorted by (term, docid)
+      - output: postings_path (blocked binary) + lexicon_path (pickle)
+
+    For each term:
+      - aggregate tf if the same (term, docid) appears across runs
+      - call ListWriter.add_term(term, {docid: tf})
+      - lexicon.add(term, returned_entry)
+    """
+    # open all runs
+    readers = [RunReader(p) for p in run_paths]
+
+    # init heap with first row from each run
+    heap = []  # (term, docid, run_idx, tf)
+    for i, r in enumerate(readers):
+        try:
+            t, d, tf = next(r)
+            heap.append((t, d, i, tf))
+        except StopIteration:
+            pass
+    heapq.heapify(heap)
+
+    writer = ListWriter(postings_path, block_size=block_size)
+    lex = Lexicon()
+
+    cur_term = None
+    cur_postings = defaultdict(int)  # docid -> tf
+
+    def flush_term():
+        nonlocal cur_term, cur_postings
+        if cur_term is None:
+            return
+        entry = writer.add_term(cur_term, cur_postings)   # writes blocks
+        lex.add(cur_term, entry)                          # records offsets/blocks
+        cur_postings.clear()
+
+    while heap:
+        term, docid, i, tf = heapq.heappop(heap)
+
+        # new term boundary -> flush previous term
+        if cur_term is None:
+            cur_term = term
+        elif term != cur_term:
+            flush_term()
+            cur_term = term
+
+        # aggregate tf for this (term, docid)
+        cur_postings[docid] += tf
+
+        # advance that run
+        try:
+            t2, d2, tf2 = next(readers[i])
+            heapq.heappush(heap, (t2, d2, i, tf2))
+        except StopIteration:
+            pass
+
+    # flush last term
+    flush_term()
+
+    # close & persist
+    writer.close()
+    lex.save(lexicon_path)
+
+    # close runs
+    for r in readers:
+        try:
+            r._f.close()
+        except Exception:
+            pass
+
 class Merger:
     """
     Merge multiple sorted runs into final blocked postings + lexicon.

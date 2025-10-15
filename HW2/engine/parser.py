@@ -2,7 +2,7 @@ import re
 import html
 from ftfy import fix_text
 from engine.utils import write_doc_lengths
-from engine.paths import DOC_LENGTHS_PATH
+from engine.paths import DOC_LENGTHS_PATH, MARCO_TSV_PATH
 
 class Parser:
     """
@@ -64,6 +64,6 @@ class Parser:
 
 if __name__ == "__main__":
     parser = Parser()
-    docs, lens = parser.parse_docs("data/marco_small.tsv")
+    docs, lens = parser.parse_docs(MARCO_TSV_PATH)
     for docid, toks in list(docs.items())[:10]:
         print(docid, toks)

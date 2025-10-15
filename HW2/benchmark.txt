@@ -102,3 +102,34 @@ Q: 3.14 math
 9 12.979
 4 12.141
 0 11.948
+
+
+
+
+
+$ time python -m engine.parser
+Loaded 1000000 docs
+Doc lengths saved to data/doc_lengths.pkl
+
+real    1m43.765s
+user    0m0.016s
+sys     0m0.124s
+
+
+
+
+
+
+$ time python -m engine.indexer
+[Indexer] Building index from data\marco_medium.tsv
+Loaded 1000000 docs
+Doc lengths saved to data/doc_lengths.pkl
+ListWriter: wrote 0 bytes to data/index.postings
+Lexicon saved: 686254 terms to data/index.lexicon
+[Indexer] Wrote postings → data/index.postings
+[Indexer] Wrote lexicon  → data/index.lexicon
+Sample postings for 'munteanu': 1 docs
+
+real    2m17.967s
+user    0m0.077s
+sys     0m0.123s

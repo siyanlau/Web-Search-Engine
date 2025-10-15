@@ -19,4 +19,7 @@ META_PATH = f"{DATA_DIR}/index.meta"             # optional, for global stats
 DOC_LENGTHS_PATH = f"{DATA_DIR}/doc_lengths.pkl"
 
 # --- Source corpus files ---
-MARCO_TSV_PATH = os.path.join(DATA_DIR, "marco_small.tsv")
+MARCO_TSV_PATH = os.path.join(DATA_DIR, "marco_medium.tsv")
+
+# --- Number of docs (for benchmarking) ---
+NUM_DOCS = 1000000

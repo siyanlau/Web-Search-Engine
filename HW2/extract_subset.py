@@ -10,8 +10,9 @@ Usage:
 
 import argparse
 import os
+from engine.paths import NUM_DOCS, MARCO_TSV_PATH
 
-def extract_subset(input_path, output_path, limit=30000):
+def extract_subset(input_path, output_path, limit=NUM_DOCS):
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Input file not found: {input_path}")
     
@@ -33,7 +34,7 @@ def extract_subset(input_path, output_path, limit=30000):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--input", default="collection.tsv", help="Path to full collection.tsv")
-    ap.add_argument("--output", default="data/marco_small.tsv", help="Output path for subset")
-    ap.add_argument("--limit", type=int, default=30000, help="Number of lines to extract")
+    ap.add_argument("--output", default=MARCO_TSV_PATH, help="Output path for subset")
+    ap.add_argument("--limit", type=int, default=NUM_DOCS, help="Number of lines to extract")
     args = ap.parse_args()
     extract_subset(args.input, args.output, args.limit)

@@ -12,7 +12,7 @@ Output files:
 """
 
 from collections import defaultdict
-from engine.paths import POSTINGS_PATH, LEXICON_PATH, MARCO_TSV_PATH
+from engine.paths import POSTINGS_PATH, LEXICON_PATH, MARCO_TSV_PATH, NUM_DOCS
 from engine.listio import ListWriter
 from engine.lexicon import Lexicon
 
@@ -88,13 +88,13 @@ if __name__ == "__main__":
 
     print("[Indexer] Building index from", MARCO_TSV_PATH)
     parser = Parser()
-    docs, _ = parser.parse_docs(MARCO_TSV_PATH, limit=30000)
+    docs, _ = parser.parse_docs(MARCO_TSV_PATH, limit=NUM_DOCS)
 
     indexer = Indexer()
     indexer.build_inverted_index(docs)
     indexer.save_to_disk()
 
     # Quick sanity check: print one term’s postings length
-    sample_term = "communication"
+    sample_term = "munteanu"
     postings = indexer.get_postings(sample_term)
     print(f"Sample postings for '{sample_term}': {len(postings)} docs")
