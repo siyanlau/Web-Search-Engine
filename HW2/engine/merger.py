@@ -2,175 +2,220 @@
 """
 K-way merger for intermediate sorted runs.
 
-Reads multiple TSV runs (term, docid, tf), merges them by (term, docid),
-accumulates tf for the same (term, docid), and writes the final blocked
-inverted index via ListWriter + Lexicon.
+This merges multiple *sorted* runs (each yields (term:str, docid:int, tf:int)
+in strictly (term, docid) order) into the final blocked inverted index.
 
-Compression-agnostic: swapping ListWriter's internal codec later requires
-no changes here.
+Features
+- Supports BOTH legacy TSV runs and the new binary RUN1 runs (auto-detected).
+- Writes the final postings via ListWriter and term metadata via Lexicon.
+- No dependency on the on-disk postings codec: swap ListWriter(codec=...)
+  without touching this module.
+
+Complexity
+- Time:  O(TotalPostings * log K) where K is the number of runs.
+- Space: O(#unique_docids_in_current_term) for the accumulation dict.
 """
 
-import heapq
-from collections import defaultdict
-from typing import List, Tuple
+from __future__ import annotations
 
-from engine.runio import RunReader
+import heapq
+import io
+import os
+import sys
+from collections import defaultdict
+from typing import Iterable, List, Tuple
+
+from engine.runio import RunReader, BinaryRunReader  # TSV + RUN1
 from engine.listio import ListWriter
 from engine.lexicon import Lexicon
 
-def merge_runs_to_index(run_paths, postings_path, lexicon_path, block_size=128):
-    """
-    K-way merge over sorted TSV runs:
-      - inputs: list of run files (term, docid, tf) sorted by (term, docid)
-      - output: postings_path (blocked binary) + lexicon_path (pickle)
 
-    For each term:
-      - aggregate tf if the same (term, docid) appears across runs
-      - call ListWriter.add_term(term, {docid: tf})
-      - lexicon.add(term, returned_entry)
-    """
-    # open all runs
-    readers = [RunReader(p) for p in run_paths]
+# ----------------------------
+# Run reader auto-detection
+# ----------------------------
 
-    # init heap with first row from each run
-    heap = []  # (term, docid, run_idx, tf)
+def open_run_reader(path: str):
+    """
+    Factory that opens the proper reader based on file magic.
+    - Binary RUN1: first 4 bytes == b"RUN1"  -> BinaryRunReader
+    - Otherwise: fall back to TSV RunReader
+    """
+    try:
+        with open(path, "rb") as f:
+            hdr = f.read(4)
+        if hdr == b"RUN1":
+            return BinaryRunReader(path)
+    except Exception:
+        # Any issue -> treat as TSV
+        pass
+    return RunReader(path)
+
+
+# ----------------------------
+# Core merge routine
+# ----------------------------
+
+def merge_runs_to_index(
+    run_paths: Iterable[str],
+    postings_path: str,
+    lexicon_path: str,
+    *,
+    block_size: int = 128,
+    codec: str = "raw",
+    progress_every: int = 1_000_000,
+) -> None:
+    """
+    K-way merge over sorted runs:
+
+    Args:
+        run_paths: iterable of run file paths; each run is sorted by (term, docid).
+        postings_path: final postings file (binary, written by ListWriter).
+        lexicon_path: final lexicon file (pickle, written by Lexicon.save()).
+        block_size: ListWriter block size (number of (docid, tf) pairs per block target).
+        codec: codec to use inside ListWriter ("raw", "varbyte", ...).
+        progress_every: print a progress line after consuming this many postings.
+
+    Behavior:
+        For each term, we aggregate tf across runs for identical (term, docid),
+        then hand the whole postings dict to ListWriter.add_term().
+    """
+    # Open all runs with auto-detection
+    readers = [open_run_reader(p) for p in run_paths]
+
+    # Min-heap of (term, docid, tf, src_idx)
+    heap: List[Tuple[str, int, int, int]] = []
+
+    # Prime the heap with the first record from each run
     for i, r in enumerate(readers):
         try:
             t, d, tf = next(r)
-            heap.append((t, d, i, tf))
+            heap.append((t, d, tf, i))
         except StopIteration:
             pass
     heapq.heapify(heap)
 
-    writer = ListWriter(postings_path, block_size=block_size)
+    writer = ListWriter(postings_path, block_size=block_size, codec=codec)
     lex = Lexicon()
 
-    cur_term = None
-    cur_postings = defaultdict(int)  # docid -> tf
+    current_term: str | None = None
+    accum: defaultdict[int, int] = defaultdict(int)  # docid -> tf
 
-    def flush_term():
-        nonlocal cur_term, cur_postings
-        if cur_term is None:
+    consumed = 0  # number of postings consumed from input runs
+
+    def flush_current_term():
+        nonlocal current_term, accum
+        if current_term is None or not accum:
             return
-        entry = writer.add_term(cur_term, cur_postings)   # writes blocks
-        lex.add(cur_term, entry)                          # records offsets/blocks
-        cur_postings.clear()
+        # ListWriter.add_term takes {docid: tf} and returns an entry
+        entry = writer.add_term(current_term, accum)
+        lex.add(current_term, entry)
+        accum.clear()
 
     while heap:
-        term, docid, i, tf = heapq.heappop(heap)
+        term, docid, tf, src = heapq.heappop(heap)
 
-        # new term boundary -> flush previous term
-        if cur_term is None:
-            cur_term = term
-        elif term != cur_term:
-            flush_term()
-            cur_term = term
+        # Term boundary -> flush previous postings
+        if current_term is None:
+            current_term = term
+        elif term != current_term:
+            flush_current_term()
+            current_term = term
 
-        # aggregate tf for this (term, docid)
-        cur_postings[docid] += tf
+        # Aggregate tf for this (term, docid)
+        accum[docid] += tf
+        consumed += 1
+        if progress_every and (consumed % progress_every == 0):
+            print(f"[merger] consumed={consumed:,}  heap={len(heap)}  term='{term[:24]}'", file=sys.stderr)
 
-        # advance that run
+        # Advance the source run
         try:
-            t2, d2, tf2 = next(readers[i])
-            heapq.heappush(heap, (t2, d2, i, tf2))
+            t2, d2, tf2 = next(readers[src])
+            heapq.heappush(heap, (t2, d2, tf2, src))
         except StopIteration:
             pass
 
-    # flush last term
-    flush_term()
+    # Flush the last term
+    flush_current_term()
 
-    # close & persist
+    # Persist outputs
     writer.close()
     lex.save(lexicon_path)
 
-    # close runs
+    # Close runs (be permissive; readers may or may not expose .close())
     for r in readers:
+        close = getattr(r, "close", None)
         try:
-            r._f.close()
+            if callable(close):
+                close()
         except Exception:
             pass
 
+    print(f"[merger] DONE  postings -> {postings_path}")
+    print(f"[merger] DONE  lexicon  -> {lexicon_path}")
+
+
+# ----------------------------
+# OOP wrapper
+# ----------------------------
+
 class Merger:
     """
-    Merge multiple sorted runs into final blocked postings + lexicon.
+    Thin OO wrapper around merge_runs_to_index().
     """
 
-    def __init__(self, postings_path: str, lexicon_path: str, block_size: int = 128):
+    def __init__(self, postings_path: str, lexicon_path: str, *, block_size: int = 128, codec: str = "raw"):
         self.postings_path = postings_path
         self.lexicon_path = lexicon_path
         self.block_size = block_size
+        self.codec = codec
 
-    def merge(self, run_paths: List[str]):
-        """
-        Args:
-            run_paths: list of file paths to TSV runs (each sorted by term,docid).
+    def merge(self, run_paths: List[str]) -> None:
+        merge_runs_to_index(
+            run_paths,
+            postings_path=self.postings_path,
+            lexicon_path=self.lexicon_path,
+            block_size=self.block_size,
+            codec=self.codec,
+        )
 
-        Produces:
-            - postings_path (binary blocked postings, via ListWriter)
-            - lexicon_path  (pickle term->entry)
-        """
-        readers = [RunReader(p) for p in run_paths]
-        # Min-heap of (term, docid, tf, run_idx)
-        heap: List[Tuple[str, int, int, int]] = []
 
-        # Prime heap: pull first item from each run if any
-        for i, r in enumerate(readers):
-            try:
-                t, d, tf = next(r)
-                heap.append((t, d, tf, i))
-            except StopIteration:
-                pass
-        heapq.heapify(heap)
+# ----------------------------
+# CLI
+# ----------------------------
 
-        writer = ListWriter(self.postings_path, block_size=self.block_size)
-        lex = Lexicon()
-
-        # Current accumulation for a term
-        current_term = None
-        accum: defaultdict[int, int] = defaultdict(int)  # docid -> tf
-
-        while heap:
-            term, docid, tf, src = heapq.heappop(heap)
-
-            # If term changes, flush previous term
-            if current_term is None:
-                current_term = term
-            if term != current_term:
-                if accum:
-                    entry = writer.add_term(current_term, accum)
-                    lex.add(current_term, entry)
-                    accum.clear()
-                current_term = term
-
-            # Accumulate tf for same (term, docid)
-            accum[docid] += tf
-
-            # Advance the source run
-            try:
-                t2, d2, tf2 = next(readers[src])
-                heapq.heappush(heap, (t2, d2, tf2, src))
-            except StopIteration:
-                pass
-
-        # Flush the last term
-        if current_term is not None and accum:
-            entry = writer.add_term(current_term, accum)
-            lex.add(current_term, entry)
-
-        writer.close()
-        lex.save(self.lexicon_path)
-        print(f"[Merger] Wrote postings -> {self.postings_path}")
-        print(f"[Merger] Wrote lexicon  -> {self.lexicon_path}")
+def _expand_globs(paths: List[str]) -> List[str]:
+    # Windows shell may not expand globs; do it here.
+    out: List[str] = []
+    for p in paths:
+        if any(ch in p for ch in "*?[]"):
+            import glob
+            out.extend(sorted(glob.glob(p)))
+        else:
+            out.append(p)
+    return out
 
 
 if __name__ == "__main__":
-    # Example CLI (run from repo root):
-    #   python -m engine.merger data/runs/run1.tsv data/runs/run2.tsv
-    import sys
-    if len(sys.argv) < 2:
-        print("Usage: python -m engine.merger <run1.tsv> <run2.tsv> ...")
-        sys.exit(1)
-
+    # Example:
+    #   python -m engine.merger data/runs/*.run              # binary runs
+    #   python -m engine.merger data/runs/*.tsv              # legacy TSV runs
+    #   python -m engine.merger --codec varbyte --block 256 data/runs/*.run
+    import argparse
     from engine.paths import POSTINGS_PATH, LEXICON_PATH
-    merger = Merger(POSTINGS_PATH, LEXICON_PATH, block_size=128)
-    merger.merge(sys.argv[1:])
+
+    ap = argparse.ArgumentParser(description="K-way merge sorted runs into final index.")
+    ap.add_argument("runs", nargs="+", help="Input runs (glob or list). Each must be sorted by (term, docid).")
+    ap.add_argument("--postings", default=POSTINGS_PATH, help="Output postings path (binary).")
+    ap.add_argument("--lexicon", default=LEXICON_PATH, help="Output lexicon (pickle).")
+    ap.add_argument("--block", dest="block_size", type=int, default=128, help="ListWriter block size.")
+    ap.add_argument("--codec", default="raw", help="ListWriter codec: raw|varbyte (etc.).")
+    ap.add_argument("--progress-every", type=int, default=1_000_000, help="Stderr progress interval in #postings (0=off).")
+    args = ap.parse_args()
+
+    run_paths = _expand_globs(args.runs)
+    if not run_paths:
+        print("No input runs after glob expansion.", file=sys.stderr)
+        sys.exit(2)
+
+    merger = Merger(args.postings, args.lexicon, block_size=args.block_size, codec=args.codec)
+    merger.merge(run_paths)
