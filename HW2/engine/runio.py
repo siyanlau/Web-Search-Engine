@@ -17,6 +17,15 @@ class RunWriter:
 
     The writer guarantees the output is globally sorted by (term, docid).
     """
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.close()
+        except Exception:
+            pass
+    
     def __init__(self, path: str):
         self.path = path
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -40,6 +49,15 @@ class RunReader:
 
     Yields tuples: (term: str, docid: int, tf: int)
     """
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            self.close()
+        except Exception:
+            pass
+    
     def __init__(self, path: str):
         self.path = path
         self._f = open(path, "r", encoding="utf-8")

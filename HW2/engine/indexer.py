@@ -1,6 +1,8 @@
 """
 engine/indexer.py
 
+Deprecated path, for testing purposes only. Use `build_runs` to generate the intermediate postings instead.
+
 Builds an inverted index from parsed documents and writes it to disk
 in *blocked binary format* (v0.4). This replaces the earlier pickle-based
 index for scalability and I/O efficiency.
