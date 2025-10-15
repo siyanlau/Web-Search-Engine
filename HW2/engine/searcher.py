@@ -123,6 +123,55 @@ class Searcher:
         else:
             raise ValueError("mode must be AND or OR")
 
+    # engine/searcher.py  (inside class Searcher)
+
+    def search_topk_daat(self, query: str, topk: int = 10, k1: float = 1.2, b: float = 0.75, mode: str = "AND"):
+        """
+        DAAT + BM25 ranking (no pruning). Requires doc_lengths.
+
+        This is a convenience wrapper that reuses the already-opened
+        lexicon and postings reader (if present) to avoid reopen cost.
+        It does not modify any of the existing search paths.
+        """
+        # We need document lengths for BM25. If absent, return no results.
+        if not getattr(self, "doc_lengths", None):
+            return []
+
+        # Prefer the instance's cached lexicon map (e.g., self.lexicon),
+        # otherwise load it once for this call.
+        lex = getattr(self, "lexicon", None)
+        if lex is None:
+            from engine.lexicon import Lexicon
+            from engine.paths import LEXICON_PATH
+            lex = Lexicon.load(LEXICON_PATH).map
+
+        # Prefer the instance's ListReader (e.g., self.reader). If the Searcher
+        # does not hold one, create a temporary reader and close it on exit.
+        reader = getattr(self, "reader", None)
+        owns_reader = False
+        if reader is None:
+            from engine.listio import ListReader
+            from engine.paths import POSTINGS_PATH
+            reader = ListReader(POSTINGS_PATH)
+            owns_reader = True
+
+        try:
+            from engine.daat_ranker import ranked_daat
+            return ranked_daat(
+                query=query,
+                lex_map=lex,
+                reader=reader,
+                doc_lengths=self.doc_lengths,
+                topk=topk,
+                k1=k1,
+                b=b,
+                mode=mode,   # "AND" to match your baseline BM25, "OR" for disjunctive scoring
+            )
+        finally:
+            if owns_reader:
+                reader.close()
+
+
 
 # if __name__ == "__main__":
 #     # Run from project root:  python -m engine.searcher
@@ -162,24 +211,64 @@ if __name__ == "__main__":
                 return set(obj)
         return set()
 
-    # Helper: DAAT boolean result (set of docids)
-    def daat_set(query: str, mode: str = "AND"):
-        lex = Lexicon.load(LEXICON_PATH).map
-        reader = ListReader(POSTINGS_PATH)
-        terms = [t for t in query.lower().split() if t in lex]
+    # # Helper: DAAT boolean result (set of docids)
+    # def daat_set(query: str, mode: str = "AND"):
+    #     lex = Lexicon.load(LEXICON_PATH).map
+    #     reader = ListReader(POSTINGS_PATH)
+    #     terms = [t for t in query.lower().split() if t in lex]
+    #     if not terms:
+    #         reader.close()
+    #         return set()
+    #     cursors = [PostingsCursor(reader, t, lex[t]) for t in terms]
+    #     if mode.upper() == "AND":
+    #         res = set(boolean_and_daat(cursors))
+    #     elif mode.upper() == "OR":
+    #         res = set(boolean_or_daat(cursors))
+    #     else:
+    #         reader.close()
+    #         raise ValueError("mode must be AND or OR")
+    #     reader.close()
+    #     return res
+    
+    lex = Lexicon.load(LEXICON_PATH).map
+    reader = ListReader(POSTINGS_PATH)
+    
+    def daat_set(query: str, mode: str = "AND", lex_map=None, rd=None):
+        from engine.daat import PostingsCursor, boolean_and_daat, boolean_or_daat
+        lex_map = lex_map or lex
+        rd = rd or reader
+        terms = [t for t in query.lower().split() if t in lex_map]
         if not terms:
-            reader.close()
             return set()
-        cursors = [PostingsCursor(reader, t, lex[t]) for t in terms]
+
+        # AND：按 df 升序排列，减少推进成本（不改任何存储结构）
         if mode.upper() == "AND":
-            res = set(boolean_and_daat(cursors))
-        elif mode.upper() == "OR":
-            res = set(boolean_or_daat(cursors))
+            terms.sort(key=lambda t: lex_map[t]["df"])
+
+        cursors = [PostingsCursor(rd, t, lex_map[t]) for t in terms]
+        if mode.upper() == "AND":
+            return set(boolean_and_daat(cursors))
         else:
-            reader.close()
-            raise ValueError("mode must be AND or OR")
-        reader.close()
-        return res
+            # 小 k（≤2）时直接两路归并，避免 heap 常数
+            if len(cursors) == 2:
+                a, b = cursors
+                out = set()
+                da, db = a.docid(), b.docid()
+                while da is not None and db is not None:
+                    if da == db:
+                        out.add(da); da = a.advance(); db = b.advance()
+                    elif da < db:
+                        out.add(da); da = a.advance()
+                    else:
+                        out.add(db); db = b.advance()
+                while da is not None:
+                    out.add(da); da = a.advance()
+                while db is not None:
+                    out.add(db); db = b.advance()
+                return out
+            #  min-heap
+            from engine.daat import boolean_or_daat
+            return set(boolean_or_daat(cursors))
 
     # Construct searchers
     s_full = Searcher()               # BM25 enabled (loads doc_lengths)
