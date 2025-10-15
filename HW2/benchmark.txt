@@ -133,3 +133,90 @@ Sample postings for 'munteanu': 1 docs
 real    2m17.967s
 user    0m0.077s
 sys     0m0.123s
+
+
+
+
+
+
+$ time python -m engine.build_runs_mp --input data/marco_medium.tsv --outdir data/runs --batch-size 100000 --workers 4
+[BuildRunsMP] Doc lengths saved to data/doc_lengths.pkl  N=1000000
+[BuildRunsMP] Total docs=1000000  total rows=39397529  runs=10
+
+real    1m7.835s
+user    0m0.091s
+sys     0m0.108s
+
+
+
+$ time python -m engine.build_runs_mp --input data/marco_medium.tsv --outdir data/runs --batch-size 50000 --workers 4
+Doc lengths saved to data/doc_lengths.pkl
+[BuildRunsMP] Doc lengths saved to data/doc_lengths.pkl  N=1000000
+[BuildRunsMP] Total docs=1000000  total rows=39397529  runs=20
+
+real    1m3.639s
+user    0m0.093s
+sys     0m0.137s
+
+
+
+
+$ time python -m engine.merger data/runs/run_*.tsv
+ListWriter: wrote 322881336 bytes to data/index.postings
+Lexicon saved: 686254 terms to data/index.lexicon
+[Merger] Wrote postings -> data/index.postings
+[Merger] Wrote lexicon  -> data/index.lexicon
+
+real    1m59.295s
+user    0m0.061s
+sys     0m0.185s
+
+
+
+
+
+[with 1M docs]
+$ time python -m engine.searcher
+Lexicon loaded: 686254 terms from data/index.lexicon
+Lexicon loaded: 686254 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+Lexicon loaded: 686254 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+=== Boolean vs DAAT (set equality & timing) ===
+
+Q: overturned carriage
+  AND equal: True | sizes: base=1 daat=1 | time base=0.0160s daat=0.0002s
+  OR  equal: True  | sizes: base=284 daat=284   | time base=0.0048s daat=0.0001s      
+
+Q: communication policy
+  AND equal: True | sizes: base=30 daat=30 | time base=0.0175s daat=0.0025s
+  OR  equal: True  | sizes: base=8863 daat=8863   | time base=0.0189s daat=0.0032s    
+
+Q: machine learning
+  AND equal: True | sizes: base=49 daat=49 | time base=0.0171s daat=0.0023s
+  OR  equal: True  | sizes: base=8275 daat=8275   | time base=0.0184s daat=0.0022s    
+
+Q: u.s policy
+  AND equal: True | sizes: base=232 daat=232 | time base=0.0408s daat=0.0059s
+  OR  equal: True  | sizes: base=25041 daat=25041   | time base=0.0432s daat=0.0054s  
+
+Q: 3.14 math
+  AND equal: True | sizes: base=5 daat=5 | time base=0.0063s daat=0.0002s
+  OR  equal: True  | sizes: base=1440 daat=1440   | time base=0.0109s daat=0.0008s    
+
+=== BM25 sample (top 10) ===
+2 21.35
+137268 17.726
+8 16.777
+3 15.874
+329341 15.759
+521492 15.559
+749035 15.282
+1 15.147
+5 14.507
+
+real    0m8.200s
+user    0m0.045s
+sys     0m0.015s
+
+

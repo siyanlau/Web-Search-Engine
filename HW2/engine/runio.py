@@ -7,6 +7,8 @@ These runs are used by the k-way merger to produce the final blocked index.
 """
 
 import os
+import sys
+
 
 class RunWriter:
     """

@@ -308,6 +308,6 @@ if __name__ == "__main__":
               f"| time base={t2-t1:.4f}s daat={t5-t3 - (t4-t3):.4f}s")
 
     print("\n=== BM25 sample (top 10) ===")
-    res = s_full.search("manhattan project", topk=10)
+    res = s_full.search("3.14 math", topk=10)
     for docid, score in res:
         print(docid, round(score, 3))
