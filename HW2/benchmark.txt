@@ -220,3 +220,28 @@ user    0m0.045s
 sys     0m0.015s
 
 
+
+
+
+
+
+$ time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 4
+Doc lengths saved to data/doc_lengths.pkl
+[BuildRunsMP] Doc lengths saved to data/doc_lengths.pkl  N=8841823
+[BuildRunsMP] Total docs=8841823  total rows=351891634  runs=89
+
+real    10m32.799s
+user    0m0.218s
+sys     0m0.170s
+
+
+
+(My CPU has 8 cores. Now it's maxed out. CPU utilization is pretty good in this run.)
+$ time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 8
+Doc lengths saved to data/doc_lengths.pkl
+[BuildRunsMP] Doc lengths saved to data/doc_lengths.pkl  N=8841823
+[BuildRunsMP] Total docs=8841823  total rows=351891634  runs=89
+
+real    4m32.633s
+user    0m0.123s
+sys     0m0.108s

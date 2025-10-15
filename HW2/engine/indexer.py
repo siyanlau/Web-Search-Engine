@@ -68,7 +68,7 @@ class Indexer:
             - POSTINGS_PATH (binary)
             - LEXICON_PATH (pickle)
         """
-        writer = ListWriter(POSTINGS_PATH)
+        writer = ListWriter(POSTINGS_PATH, codec="varbyte")
         lex = Lexicon()
 
         for term, postings in self.index.items():

@@ -123,8 +123,6 @@ class Searcher:
         else:
             raise ValueError("mode must be AND or OR")
 
-    # engine/searcher.py  (inside class Searcher)
-
     def search_topk_daat(self, query: str, topk: int = 10, k1: float = 1.2, b: float = 0.75, mode: str = "AND"):
         """
         DAAT + BM25 ranking (no pruning). Requires doc_lengths.
