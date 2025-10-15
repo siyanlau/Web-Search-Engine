@@ -65,8 +65,10 @@ class ListWriter:
         return entry
 
     def close(self):
+        size = self.file.tell()
         self.file.close()
-        print(f"ListWriter: wrote {self.offset} bytes to {self.filepath}")
+        print(f"ListWriter: wrote {size} bytes to {self.filepath}")
+
 
 
 class ListReader:
