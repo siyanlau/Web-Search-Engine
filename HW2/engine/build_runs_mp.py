@@ -28,7 +28,7 @@ Outputs:
 - data/doc_lengths.pkl  (consistent with docIDs used in runs)
 
 How to use:
-python -m engine.build_runs_mp --input data/marco_medium.tsv --outdir data/runs --batch-size 50000 --workers 4
+time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 8
 
 After this, run your existing merger:
     python -m engine.merger data/runs/run_*.tsv
@@ -42,7 +42,8 @@ from typing import Dict, List, Tuple
 
 from engine.parser import Parser
 from engine.indexer import Indexer
-from engine.runio import RunWriter
+# from engine.runio import RunWriter
+from engine.runio import BinaryRunWriter
 from engine.utils import write_doc_lengths
 from engine.paths import DOC_LENGTHS_PATH
 
@@ -89,11 +90,17 @@ def _worker_build_run(batch_lines: List[str], start_docid: int, run_path: str) -
     indexer = Indexer()
     indexer.build_inverted_index(docs)
 
-    # RunWriter knows how to sort (term, then docid)
-    postings = {term: dict(plist) for term, plist in indexer.index.items()}
+    # Convert to a plain dict to avoid defaultdict surprises
+    postings: Dict[str, Dict[int, int]] = {term: dict(plist) for term, plist in indexer.index.items()}
 
-    with RunWriter(run_path) as w:
-        w.write_from_index(postings)
+    # Write a grouped-binary run, strictly sorted by (term, docid)
+    with BinaryRunWriter(run_path) as w:
+        # IMPORTANT: dict iteration yields keys only; we must sort explicitly.
+        for term in sorted(postings.keys()):
+            plist = postings[term]
+            for docid in sorted(plist.keys()):
+                tf = plist[docid]
+                w.add(term, docid, tf)
 
     n_docs = len(docs)
     n_rows = sum(len(plist) for plist in indexer.index.values())
@@ -129,7 +136,7 @@ def build_runs_mp(
         for line in read_tsv_stream(input_tsv):
             batch_lines.append(line)
             if len(batch_lines) >= batch_size:
-                run_path = os.path.join(outdir, f"run_{batch_idx:06d}.tsv")
+                run_path = os.path.join(outdir, f"run_{batch_idx:06d}.run")
                 # submit a copy of current batch
                 futures.append(ex.submit(_worker_build_run, list(batch_lines), docid, run_path))
                 run_paths.append(run_path)
@@ -140,7 +147,7 @@ def build_runs_mp(
 
         # tail batch
         if batch_lines:
-            run_path = os.path.join(outdir, f"run_{batch_idx:06d}.tsv")
+            run_path = os.path.join(outdir, f"run_{batch_idx:06d}.run")
             futures.append(ex.submit(_worker_build_run, list(batch_lines), docid, run_path))
             run_paths.append(run_path)
             docid += len(batch_lines)

@@ -224,6 +224,49 @@ sys     0m0.015s
 
 
 
+(after adding varbyte/gap ID compression)
+$ time python -m engine.searcher
+Lexicon loaded: 686254 terms from data/index.lexicon
+Lexicon loaded: 686254 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+Lexicon loaded: 686254 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+=== Boolean vs DAAT (set equality & timing) ===
+
+Q: overturned carriage
+  AND equal: True | sizes: base=1 daat=1 | time base=0.0481s daat=0.0002s
+  OR  equal: True  | sizes: base=284 daat=284   | time base=0.0455s daat=0.0001s
+
+Q: communication policy
+  AND equal: True | sizes: base=30 daat=30 | time base=0.0608s daat=0.0042s
+  OR  equal: True  | sizes: base=8863 daat=8863   | time base=0.0556s daat=0.0043s
+
+Q: machine learning
+  AND equal: True | sizes: base=49 daat=49 | time base=0.0587s daat=0.0041s
+  OR  equal: True  | sizes: base=8275 daat=8275   | time base=0.0587s daat=0.0040s
+
+Q: u.s policy
+  AND equal: True | sizes: base=232 daat=232 | time base=0.0846s daat=0.0124s
+  OR  equal: True  | sizes: base=25041 daat=25041   | time base=0.0806s daat=0.0108s
+
+Q: 3.14 math
+  AND equal: True | sizes: base=5 daat=5 | time base=0.0470s daat=0.0005s
+  OR  equal: True  | sizes: base=1440 daat=1440   | time base=0.0476s daat=0.0010s
+
+=== BM25 sample (top 10) ===
+134847 21.618
+134846 21.377
+137371 21.303
+442216 19.972
+693533 19.046
+
+real    0m10.069s
+user    0m0.030s
+sys     0m0.030s
+
+
+
+
 
 $ time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 4
 Doc lengths saved to data/doc_lengths.pkl
@@ -245,3 +288,51 @@ Doc lengths saved to data/doc_lengths.pkl
 real    4m32.633s
 user    0m0.123s
 sys     0m0.108s
+
+
+
+
+
+
+
+
+Trying to figure out why merger was so slow!!
+$ python -c "import pstats; p=pstats.Stats('merger.pstats'); p.strip_dirs().sort_stats('tottime').print_stats(30)"
+Wed Oct 15 16:57:40 2025    merger.pstats
+
+         1361750748 function calls (1361750684 primitive calls) in 569.119 seconds
+
+   Ordered by: internal time
+   List reduced from 242 to 30 due to restriction <30>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        1  126.758  126.758  569.111  569.111 merger.py:103(merge)
+111544307  110.278    0.000  160.583    0.000 runio.py:71(__next__)
+  1256139   79.485    0.000  177.182    0.000 listio.py:25(add_term)
+111544219   36.958    0.000   36.958    0.000 {built-in method _heapq.heappop}
+111544218   35.232    0.000   35.232    0.000 {built-in method _heapq.heappush}
+111544307   30.347    0.000  190.930    0.000 {built-in method builtins.next}
+223072014   26.745    0.000   26.745    0.000 {method 'write' of '_io.BufferedWriter' objects}
+223072015   21.089    0.000   21.089    0.000 {built-in method _struct.pack}
+111544307   20.344    0.000   21.005    0.000 {method 'readline' of '_io.TextIOWrapper' objects}
+  1256139   19.926    0.000   29.280    0.000 {built-in method builtins.sorted}
+111544307   16.704    0.000   16.704    0.000 {method 'split' of 'str' objects}
+111544767   12.596    0.000   12.596    0.000 {method 'rstrip' of 'str' objects}
+111544218    9.354    0.000    9.354    0.000 listio.py:36(<lambda>)
+  2084661    8.809    0.000    8.809    0.000 listio.py:46(<listcomp>)
+  2084661    8.178    0.000    8.178    0.000 listio.py:47(<listcomp>)
+  3340800    2.573    0.000    2.573    0.000 {method 'tell' of '_io.BufferedWriter' objects}
+  1256138    1.042    0.000    1.042    0.000 {method 'clear' of 'dict' objects}
+  1256138    1.000    0.000    1.000    0.000 lexicon.py:47(add)
+6681988/6681986    0.612    0.000    0.612    0.000 {built-in method builtins.len}
+   229860    0.335    0.000    0.335    0.000 {built-in method _codecs.utf_8_decode}
+   229860    0.261    0.000    0.596    0.000 <frozen codecs>:319(decode)
+  2084964    0.249    0.000    0.249    0.000 {method 'append' of 'list' objects}
+  1256142    0.162    0.000    0.162    0.000 {method 'items' of 'dict' objects}
+   229860    0.065    0.000    0.065    0.000 <frozen codecs>:331(getstate)
+       90    0.009    0.000    0.009    0.000 {built-in method io.open}
+       55    0.001    0.000    0.001    0.000 {built-in method nt.stat}
+       11    0.001    0.000    0.001    0.000 {built-in method marshal.loads}
+       11    0.001    0.000    0.001    0.000 {built-in method io.open_code}
+      146    0.001    0.000    0.001    0.000 <frozen importlib._bootstrap_external>:96(_path_join)
+       11    0.000    0.000    0.000    0.000 {method 'read' of '_io.BufferedReader' objects}
