@@ -336,3 +336,46 @@ Wed Oct 15 16:57:40 2025    merger.pstats
        11    0.001    0.000    0.001    0.000 {built-in method io.open_code}
       146    0.001    0.000    0.001    0.000 <frozen importlib._bootstrap_external>:96(_path_join)
        11    0.000    0.000    0.000    0.000 {method 'read' of '_io.BufferedReader' objects}
+
+
+
+
+
+
+
+$ time python -m engine.parallel_merge data/runs/*.run --fanin 8 --wo
+rkers 8 --rounds 1 --tmpdir data/tmp_merge > last_round.txt
+[pmerge] round 0 | inputs=89 | groups=12 | fanin=8 | workers=8
+[pmerge]   group ok: run_000002.run | postings=31,706,499
+[pmerge]   group ok: run_000000.run | postings=31,505,162
+[pmerge]   group ok: run_000003.run | postings=31,817,446
+[pmerge]   group ok: run_000005.run | postings=31,999,418
+[pmerge]   group ok: run_000001.run | postings=31,586,901
+[pmerge]   group ok: run_000006.run | postings=32,171,420
+[pmerge]   group ok: run_000004.run | postings=31,997,972
+[pmerge]   group ok: run_000011.run | postings=1,634,878
+[pmerge]   group ok: run_000007.run | postings=33,237,240
+[pmerge]   group ok: run_000010.run | postings=31,068,870
+[pmerge]   group ok: run_000008.run | postings=31,848,140
+[pmerge]   group ok: run_000009.run | postings=31,317,688
+[pmerge] done | outputs=12
+
+real    5m10.382s
+user    0m0.231s
+sys     0m0.310s
+
+
+
+
+
+
+
+time python -m engine.merger data/tmp_merge/round_0000/*.run --codec raw --block 128   
+ListWriter: wrote 2815133072 bytes to data/index.postings
+Lexicon saved: 3321136 terms to data/index.lexicon
+[merger] DONE  postings -> data/index.postings
+[merger] DONE  lexicon  -> data/index.lexicon
+
+real    18m33.593s
+user    0m0.138s
+sys     0m0.732s

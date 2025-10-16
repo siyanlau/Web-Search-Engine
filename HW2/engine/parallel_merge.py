@@ -1,136 +1,227 @@
 # engine/parallel_merge.py
+"""
+Parallel multi-round merging of intermediate runs.
+
+Strategy
+--------
+- Input: a list (or glob) of sorted runs. Each run yields (term:str, docid:int, tf:int)
+  in strictly (term, docid) order. Runs can be legacy TSV or binary RUN1.
+- We perform layered merging:
+    round 0: split K runs into groups of size <= fanin, merge each group in parallel
+    round 1: repeat on the newly produced runs
+    ...
+  until the number of runs <= fanin or == 1.
+- Each group-merge produces *another run* (binary RUN1), NOT the final index.
+  After the last round, use engine.merger to write the final postings/index.
+
+CLI
+---
+  python -m engine.parallel_merge data/runs/*.run
+  python -m engine.parallel_merge --fanin 12 --workers 6 --tmpdir data/tmp_merge data/runs/*.tsv
+
+To finish to index:
+  python -m engine.merger data/tmp_merge/round_000*/run_*.run
+"""
+
 from __future__ import annotations
-import os, math, uuid, argparse
-from typing import List, Tuple
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
-from engine.runio import RunReader, RunWriter
-from engine.paths import POSTINGS_PATH, LEXICON_PATH
-from engine.merger import merge_runs_to_index  # 你已有的合并到最终索引的函数
+import argparse
+import glob
+import math
+import multiprocessing as mp
+import os
+import sys
+from heapq import merge as kmerge
+from typing import Iterable, Iterator, List, Sequence, Tuple
 
-def ensure_dir(d: str): os.makedirs(d, exist_ok=True)
+# Readers/Writers
+from engine.merger import open_run_reader          # auto-detect TSV vs RUN1  :contentReference[oaicite:2]{index=2}
+from engine.runio import BinaryRunWriter            # always write RUN1        :contentReference[oaicite:3]{index=3}
 
-def _merge_runs_to_run(in_runs: List[str], out_run: str) -> Tuple[int, int]:
+
+# --------------------------
+# utils
+# --------------------------
+
+def _expand_globs(paths: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for p in paths:
+        if any(ch in p for ch in "*?[]"):
+            out.extend(sorted(glob.glob(p)))
+        else:
+            out.append(p)
+    return out
+
+
+def _chunks(xs: Sequence[str], n: int) -> Iterator[Sequence[str]]:
+    for i in range(0, len(xs), n):
+        yield xs[i : i + n]
+
+
+# --------------------------
+# single-group worker
+# --------------------------
+
+def _merge_group_to_run(run_paths: Sequence[str], out_path: str) -> Tuple[str, int]:
     """
-    单进程：把若干 run (TSV) 归并成一个新的 run (TSV)。
-    返回 (rows_written, in_runs_count) 方便日志统计。
+    Merge a small group of runs (size <= fanin) into a single RUN1 file.
+
+    Output is strictly (term, docid) sorted; for identical (term, docid) we sum tfs.
+    Returns (out_path, postings_emitted).
     """
-    import heapq
-    # heap: (term, docid, run_idx, tf)
-    readers = [RunReader(p) for p in in_runs]
-    heap = []
-    for i, r in enumerate(readers):
-        try:
-            t, d, tf = next(r)
-            heap.append((t, d, i, tf))
-        except StopIteration:
-            pass
-    heapq.heapify(heap)
+    readers = [open_run_reader(p) for p in run_paths]
+    stream = kmerge(*(iter(r) for r in readers), key=lambda x: (x[0], x[1]))
 
-    rows = 0
-    with RunWriter(out_run) as w:
-        cur_term = None
-        cur_doc = -1
-        cur_tf = 0
+    postings = 0
+    with BinaryRunWriter(out_path) as w:
+        current_term = None
+        last_docid = -1
+        cur_tf = 0  # for current (term, docid)
+        have_doc = False
 
-        def flush_term_doc():
-            nonlocal cur_term, cur_doc, cur_tf, rows
-            if cur_term is not None and cur_doc >= 0:
-                # 写一行 term \t docid \t tf
-                # 直接走 writer 的低层写接口（你也可先缓冲再一次性写）
-                w._f.write(f"{cur_term}\t{cur_doc}\t{cur_tf}\n")
-                rows += 1
+        def flush_doc():
+            nonlocal have_doc, cur_tf
+            if have_doc:
+                w.add(current_term, last_docid, cur_tf)
+                have_doc = False
 
-        while heap:
-            term, docid, i, tf = heapq.heappop(heap)
-
-            if cur_term is None:
-                cur_term, cur_doc, cur_tf = term, docid, tf
-            elif term != cur_term:
-                flush_term_doc()
-                cur_term, cur_doc, cur_tf = term, docid, tf
+        for term, docid, tf in stream:
+            if current_term is None:
+                current_term = term
+                last_docid = docid
+                cur_tf = tf
+                have_doc = True
+            elif term != current_term:
+                # finish previous term’s tail doc and move on
+                flush_doc()
+                current_term = term
+                last_docid = docid
+                cur_tf = tf
+                have_doc = True
             else:
-                # same term, merge by docid
-                if docid == cur_doc:
+                # same term
+                if have_doc and docid == last_docid:
                     cur_tf += tf
                 else:
-                    flush_term_doc()
-                    cur_doc, cur_tf = docid, tf
+                    flush_doc()
+                    last_docid = docid
+                    cur_tf = tf
+                    have_doc = True
+            postings += 1
 
-            # advance that run
+        # finalize tail
+        flush_doc()
+
+    # Close readers
+    for r in readers:
+        close = getattr(r, "close", None)
+        if callable(close):
             try:
-                t2, d2, tf2 = next(readers[i])
-                heapq.heappush(heap, (t2, d2, i, tf2))
-            except StopIteration:
+                close()
+            except Exception:
                 pass
 
-        flush_term_doc()
+    return out_path, postings
 
-    for r in readers:
-        try: r.close()
-        except Exception: pass
 
-    return rows, len(in_runs)
+def _worker(entry):
+    # entry = (paths, out_path)
+    paths, out_path = entry
+    try:
+        path, n = _merge_group_to_run(paths, out_path)
+        return (path, n, None)
+    except Exception as e:
+        return (out_path, 0, repr(e))
 
-def parallel_merge_to_index(
-    run_paths: List[str],
-    fanin: int = 8,
-    workers: int | None = None,
-    tmpdir: str = "data/tmp_merge",
-    postings_path: str = POSTINGS_PATH,
-    lexicon_path: str = LEXICON_PATH,
-):
+
+# --------------------------
+# main driver (multi-round)
+# --------------------------
+
+def parallel_merge(inputs: Sequence[str], *, fanin: int = 12,
+                   workers: int = max(1, os.cpu_count() // 2),
+                   tmpdir: str = "data/tmp_merge", verbose: bool = True,
+                   rounds: int | None = None) -> List[str]:
     """
-    多轮并行：run TSV -> (多轮归并) -> 单一 run TSV -> 最终 postings/lexicon
+    Multi-round layered merge. Returns the list of output run paths from the last round.
     """
-    ensure_dir(tmpdir)
-    round_id = 0
-    current = list(sorted(run_paths))
+    os.makedirs(tmpdir, exist_ok=True)
+    cur = list(inputs)
 
-    while len(current) > 1:
-        groups = [current[i:i+fanin] for i in range(0, len(current), fanin)]
-        next_round: List[str] = []
+    round_idx = 0
+    while len(cur) > 1:
+        groups = list(_chunks(cur, fanin))
+        if verbose:
+            print(f"[pmerge] round {round_idx} | inputs={len(cur)} | groups={len(groups)} | fanin={fanin} | workers={workers}", file=sys.stderr)
 
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            futs = {}
-            for g in groups:
-                out_run = os.path.join(tmpdir, f"r{round_id}_{uuid.uuid4().hex[:8]}.tsv")
-                fut = ex.submit(_merge_runs_to_run, g, out_run)
-                futs[fut] = out_run
+        # prepare output paths
+        round_dir = os.path.join(tmpdir, f"round_{round_idx:04d}")
+        os.makedirs(round_dir, exist_ok=True)
 
-            for fut in as_completed(futs):
-                rows, cnt = fut.result()
-                out_run = futs[fut]
-                next_round.append(out_run)
-                print(f"[pmerge] round={round_id} merged {cnt} runs -> {out_run} rows={rows}")
+        tasks = []
+        for gi, g in enumerate(groups):
+            out_path = os.path.join(round_dir, f"run_{gi:06d}.run")  # RUN1 always
+            tasks.append((list(g), out_path))
 
-        # 可选：清理上一轮的输入 run（如果确认不再需要）
-        # for p in current: os.remove(p)
+        # run workers
+        out_paths: List[str] = []
+        if workers <= 1 or len(tasks) == 1:
+            for t in tasks:
+                path, cnt, err = _worker(t)
+                if err:
+                    raise RuntimeError(f"group failed: {t[0]} -> {t[1]} | {err}")
+                if verbose:
+                    print(f"[pmerge]   group ok: {os.path.basename(path)} | postings={cnt:,}", file=sys.stderr)
+                out_paths.append(path)
+        else:
+            with mp.Pool(processes=workers) as pool:
+                for path, cnt, err in pool.imap_unordered(_worker, tasks, chunksize=1):
+                    if err:
+                        raise RuntimeError(f"group failed: -> {path} | {err}")
+                    if verbose:
+                        print(f"[pmerge]   group ok: {os.path.basename(path)} | postings={cnt:,}", file=sys.stderr)
+                    out_paths.append(path)
 
-        current = next_round
-        round_id += 1
+        # next round inputs
+        cur = sorted(out_paths)
+        round_idx += 1
+        
+        # stop if user limited the number of rounds
+        if rounds is not None and round_idx >= rounds:
+            break
 
-    # 只剩一个 run：写最终索引
-    final_run = current[0]
-    print(f"[pmerge] FINAL run: {final_run} -> {postings_path}, {lexicon_path}")
-    merge_runs_to_index([final_run], postings_path, lexicon_path)  # 复用你现有的最终合并函数
-    # 可选：清理 final_run
-    # os.remove(final_run)
+        # stop early if already small enough
+        if len(cur) <= fanin:
+            break
+
+    if verbose:
+        print(f"[pmerge] done | outputs={len(cur)}", file=sys.stderr)
+    return cur
+
+
+# --------------------------
+# CLI
+# --------------------------
 
 def main():
-    ap = argparse.ArgumentParser(description="Parallel layered merge of TSV runs into final index.")
-    ap.add_argument("runs", nargs="+", help="Input run_*.tsv paths")
-    ap.add_argument("--fanin", type=int, default=8, help="Max runs merged per process per round")
-    ap.add_argument("--workers", type=int, default=None, help="#processes (default: cpu_count())")
-    ap.add_argument("--tmpdir", default="data/tmp_merge", help="Directory for intermediate runs")
+    ap = argparse.ArgumentParser(description="Parallel layered merging of runs (outputs RUN1).")
+    ap.add_argument("runs", nargs="+", help="Input runs (glob or list). TSV or RUN1.")
+    ap.add_argument("--fanin", type=int, default=12, help="Group size per merge job.")
+    ap.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 4) // 2), help="Parallel workers.")
+    ap.add_argument("--tmpdir", default="data/tmp_merge", help="Directory for intermediate rounds.")
+    ap.add_argument("--quiet", action="store_true", help="Less logging.")
+    ap.add_argument("--rounds", type=int, default=None, help="Number of rounds to run (default: until <= fanin).")
     args = ap.parse_args()
 
-    parallel_merge_to_index(
-        run_paths=args.runs,
-        fanin=args.fanin,
-        workers=args.workers,
-        tmpdir=args.tmpdir,
-    )
+    inputs = _expand_globs(args.runs)
+    if not inputs:
+        print("No input runs.", file=sys.stderr)
+        sys.exit(2)
+
+    outs = parallel_merge(inputs, fanin=args.fanin, workers=args.workers, tmpdir=args.tmpdir, verbose=not args.quiet, rounds=args.rounds)
+    # Print outputs (one per line) so the caller can pipe them into merger.py
+    for p in outs:
+        print(p)
 
 if __name__ == "__main__":
     main()
