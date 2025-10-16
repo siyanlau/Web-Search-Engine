@@ -1,3 +1,1 @@
-*.zip
-SiyanLiu1
-HW2/data/*
+__pycache__/
