@@ -27,7 +27,7 @@ python -m engine.parallel_merge data/runs/*.run \
 python -m engine.merger data/tmp_merge/round_0000/*.run --codec raw --block 128
 ```
 
-This writes `data/index.postings` (binary, block-oriented) and `data/index.lexicon` (pickle directory).
+This writes `data/index.postings` (binary, compressed, and block-oriented) and `data/index.lexicon` (pickle directory).
 
 ### Search (Boolean DAAT / BM25)
 
@@ -44,11 +44,11 @@ print(s.search("communication policy", mode="AND"))  # Boolean AND
 
 ```
               ┌────────────────────────┐
- TSV Corpus → │ build_runs_mp (MP)     │  parses+tokenizes per batch
+ TSV Corpus → │ build_runs_mp          │  parses+tokenizes per batch
               │ - in-memory per-batch  │  → RUN1 files: data/runs/run_*.run
               │ - writes RUN1          │  → doc_lengths.pkl (global, once)
               └──────────┬─────────────┘
-                         │ many runs
+                         │ many runs (89 if you use default params)
                          ▼
               ┌────────────────────────┐
               │ parallel_merge         │  layered, per-group k-way merge
@@ -71,7 +71,7 @@ print(s.search("communication policy", mode="AND"))  # Boolean AND
 
 **Binary RUN1** (intermediate): grouped by term; for each term store `n`, then `n` `uint32` docIDs and `n` `uint32` freqs (little-endian). The reader streams group-by-term with minimal copies.
 
-**Final index**: `index.postings` is **block-oriented** (default 128 docs/block) with codecs (`raw`, `varbyte`). `index.lexicon` stores for each term: postings file offset, `df`, number of blocks, and a per-block directory (`offset`, `last_docid`, `doc_bytes`, `freq_bytes`, `codec`). The reader uses this directory for fast block seeks/streaming.
+**Final index**: `index.postings` is **block-oriented** (default 128 docs/block) with codecs (`raw`, `varbyte`). `index.lexicon` stores for each term: postings file offset, `df`, number of blocks, and a per-block directory (`offset`, `last_docid`, `doc_bytes`, `freq_bytes`, `codec`). This directory enables fast block seeks/streaming, because you know exactly where to find a block, given a term and a docID.
 
 ---
 
@@ -102,7 +102,8 @@ print(s.search("communication policy", mode="AND"))  # Boolean AND
 
 * **Build runs** (workers=8, batch=100k): `real 4m32.633s` (89 runs) 
 * **Parallel merge** (one round, fanin=8, workers=8): `real 5m10.382s` → **12 outputs** 
-* **Final merger** (12 → index, `--codec raw --block 128`): `real 18m33.593s` (postings 2,815,133,072 bytes; 3,321,136 terms) 
+* **Final merger** (12 → index, `--codec raw --block 128`): `real 18m33.593s` (postings 2,815,133,072 bytes; 3,321,136 terms)     
+* **Search** DAAT search on the scale of 0.001s. Typically, `OR` takes longer than `AND`. 
 
 ### 1M-doc slice (for reproducibility)
 
@@ -111,28 +112,23 @@ print(s.search("communication policy", mode="AND"))  # Boolean AND
 * **Build runs (batch=100k, workers=4)**: `real 1m7.835s` (10 runs) 
 * **Build runs (batch=50k, workers=4)**: `real 1m3.639s` (20 runs) 
 * **Merger** (these runs → index): `real 1m59.295s` 
-* **Searcher demo**: Boolean/DAAT equality + timings, BM25 examples printed in the log (see file for per-query numbers). 
+* **Search** DAAT search on the scale of 0.001s. Typically, `OR` takes longer than `AND`. 
 
 > Notes: The final pass is single-writer by design; the time reductions primarily come from (a) fewer runs via larger `batch_size`, and (b) one-round parallel merge to shrink 89→~12 before the final k-way.
 
 ---
 
-## 6) Final index sizes (your run)
-
-From your screenshot (full corpus):
+## 6) Final index sizes
 
 * `index.postings`: **~2,749,154 KB (~2.62 GiB)**
 * `index.lexicon`: **~314,030 KB**
 * `doc_lengths.pkl`: **~60,340 KB**
 
-(These match the final-merge log that wrote ~2.815 GB postings and ~3.32M terms. )
-
 ---
 
-## 7) Limitations & gotchas
+## 7) Limitations
 
-* **Final merge is not parallel** (global order + single sink). Fix is to reduce inputs before it (you’re already doing one-round parallel merge).
-* **`doc_lengths.pkl` must match the docID universe** produced by the runs used for the final index. If you rebuild a different slice (e.g., only 1M) and reuse the old `doc_lengths.pkl`, BM25 will KeyError on unseen docIDs.
+* **Final merge is not parallel** (global order + single sink). This is unavoidable in my opinion, but Python made it a particularly bad bottleneck.  
 * No positional index; postings hold docIDs + TFs only.
 * No impact-ordered pruning (WAND/BMW) yet; DAAT is correctness-first.
 

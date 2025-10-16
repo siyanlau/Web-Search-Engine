@@ -268,6 +268,55 @@ sys     0m0.030s
 
 
 
+[now with 8.8M docs]
+$ time python -m engine.searcher
+Lexicon loaded: 3321136 terms from data/index.lexicon
+Lexicon loaded: 3321136 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+Lexicon loaded: 3321136 terms from data/index.lexicon
+Doc lengths loaded from data/doc_lengths.pkl
+=== Boolean vs DAAT (set equality & timing) ===
+
+Q: overturned carriage
+  AND equal: True | sizes: base=1 daat=1 | time base=0.0526s daat=0.0007s
+  OR  equal: True  | sizes: base=2486 daat=2486   | time base=0.0511s daat=0.0006s
+
+Q: communication policy
+  AND equal: True | sizes: base=173 daat=173 | time base=0.1684s daat=0.0201s
+  OR  equal: True  | sizes: base=73138 daat=73138   | time base=0.1840s daat=0.0197s
+
+Q: manhattan project bomb
+  AND equal: True | sizes: base=226 daat=226 | time base=0.1658s daat=0.0066s
+  OR  equal: True  | sizes: base=69577 daat=69577   | time base=0.1581s daat=0.0277s
+
+Q: u.s policy
+  AND equal: True | sizes: base=2105 daat=2105 | time base=0.4618s daat=0.0531s
+  OR  equal: True  | sizes: base=219485 daat=219485   | time base=0.4908s daat=0.0621s
+
+Q: 3.14 math
+  AND equal: True | sizes: base=26 daat=26 | time base=0.0719s daat=0.0012s
+  OR  equal: True  | sizes: base=13115 daat=13115   | time base=0.0670s daat=0.0063s
+
+=== BM25 sample (top 10) ===
+7137441 24.2
+7856282 21.121
+6123264 20.503
+1955978 19.425
+7464208 17.781
+1011845 17.374
+8641333 17.374
+3945765 17.348
+5311461 17.113
+134847 17.108
+
+real    0m43.575s
+user    0m0.045s
+sys     0m0.062s
+
+
+
+
+
 $ time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 4
 Doc lengths saved to data/doc_lengths.pkl
 [BuildRunsMP] Doc lengths saved to data/doc_lengths.pkl  N=8841823
