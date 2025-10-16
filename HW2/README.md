@@ -1,8 +1,4 @@
-Got it—English only. Here’s a **clean, paper-ready README** that follows your structure: how to run → architecture diagram → each component’s role & internals → timings (from your `benchmark.txt`) → final index sizes (from your screenshot) → limitations & tips.
-
----
-
-# Web Search Engine (Binary-Run + Blocked Postings)
+# Web Search Engine
 
 ## 1) How to run (end-to-end)
 
