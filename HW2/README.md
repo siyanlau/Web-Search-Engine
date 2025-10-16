@@ -1,157 +1,159 @@
-# Web Search Engine Documentation
-
-## 1. Overview
-
-This system builds a **blocked inverted index** from a TSV corpus using a **binary run→merge** pipeline and supports **Boolean DAAT** and **BM25 top-K** search. Intermediate runs are stored in a compact **binary RUN1** format; the final index uses a compressed binary postings file plus a pickle lexicon that records per-term block directories for fast seeks.  
-
-**Key components**
-
-* **Binary runs (RUN1)** via `BinaryRunWriter/Reader`: grouped by term; for each term store `n`, then `n` docids and `n` freqs as little-endian uint32. Writer requires sorted `(term, docid)` order; reader streams group-by-term with minimal allocations. 
-* **Final blocked postings** via `ListWriter/Reader`: per term the writer emits fixed-size blocks and returns a lexicon entry with `offset, df, nblocks, blocks[]` (each block has `offset, last_docid, doc_bytes, freq_bytes`, and `codec`). Reader can reconstruct full postings from the per-block directory, honoring `codec` (“raw” or “varbyte”).  
-* **Lexicon**: a persistent `term → {offset, df, nblocks, blocks[]}` map saved as a pickle. Enables `O(log B)` random access over blocks and efficient sequential streaming.  
-
-Paths are centralized in `engine/paths.py` (postings, lexicon, doc lengths, corpus path). 
+Got it—English only. Here’s a **clean, paper-ready README** that follows your structure: how to run → architecture diagram → each component’s role & internals → timings (from your `benchmark.txt`) → final index sizes (from your screenshot) → limitations & tips.
 
 ---
 
-## 2. Quickstart (CLI)
+# Web Search Engine (Binary-Run + Blocked Postings)
 
-### 2.1 Build binary runs in parallel
+## 1) How to run (end-to-end)
 
-```bash
-python -m engine.build_runs_mp --input data/marco_medium.tsv \
-  --outdir data/runs --batch-size 200000 --workers <PHYSICAL_CORES>
-```
-
-* Each worker tokenizes its batch, builds a small in-memory inverted index, and writes a **sorted binary run** (`*.run`).
-* The main process aggregates and persists `doc_lengths.pkl` **once** so it matches the docID universe of these runs.  
-
-### 2.2 Reduce runs with parallel layered merge (optional but recommended)
+### Build binary runs (multiprocessing)
 
 ```bash
-# Example: shrink many runs into ~ceil(K/fanin) bigger RUN1 files in one round
-python -m engine.parallel_merge data/runs/*.run --fanin 8 --workers 8 --rounds 1 --tmpdir data/tmp_merge > last_round.txt
+# tune workers ~= physical cores; larger batch_size → fewer runs (faster merge)
+python -m engine.build_runs_mp --input data/collection.tsv \
+  --outdir data/runs --batch-size 100000 --workers 8
 ```
 
-* Each job k-way merges up to `fanin` runs and **writes a new RUN1** (not the final index).
-* `--rounds` lets you run exactly one round (e.g., 89 → 12). The output list is printed for the next step. 
+This produces many **binary RUN1** files in `data/runs/` and writes a consistent `data/doc_lengths.pkl` aligned to the docIDs built in this step. (Doc-length persistence is done once after collecting worker outputs.) 
 
-### 2.3 Final merge → postings + lexicon
+### Shrink runs with a parallel one-round merge (e.g., 89 → 12, fan-in 8)
 
 ```bash
-# Windows: prefer globbing to avoid CRLF issues
-python -m engine.merger data/tmp_merge/round_0000/*.run
+python -m engine.parallel_merge data/runs/*.run \
+  --fanin 8 --workers 8 --rounds 1 --tmpdir data/tmp_merge > last_round.txt
+# On Windows, prefer globbing over piping a file with CRLF.
 ```
 
-* Performs a global k-way merge over RUN1 streams; for each term, aggregates tf on identical `(term, docid)` and flushes a block-encoded postings list via `ListWriter`. Saves lexicon at the end.  
+### Final merge to the on-disk index (blocked postings + lexicon)
 
-### 2.4 Search
+```bash
+# Use a glob to avoid CRLF issues:
+python -m engine.merger data/tmp_merge/round_0000/*.run --codec raw --block 128
+```
+
+This writes `data/index.postings` (binary, block-oriented) and `data/index.lexicon` (pickle directory).
+
+### Search (Boolean DAAT / BM25)
 
 ```python
 from engine.searcher import Searcher
 s = Searcher()                                  # loads lexicon/postings/doc_lengths
-print(s.search("machine learning", topk=10))     # BM25 (ranked), OR semantics by default
-print(s.search("machine learning", mode="AND"))  # Boolean AND or ranked-AND
+print(s.search("machine learning", topk=10))     # BM25, OR by default
+print(s.search("communication policy", mode="AND"))  # Boolean AND
 ```
 
-The `Searcher` loads the lexicon (pickle) and opens the binary postings reader; if `doc_lengths.pkl` is present it uses BM25 ranking, otherwise falls back to Boolean mode.  
-
 ---
 
-## 3. Internal Pipeline
+## 2) System architecture
 
-1. **Parallel run building** (`build_runs_mp`)
-
-   * Stream TSV lines, batch them (`batch_size`), and assign contiguous docIDs starting from `start_docid`.
-   * Per batch: tokenize → build inverted index → **BinaryRunWriter** emits a sorted RUN1 file.
-   * Aggregate and save `doc_lengths.pkl` once (docid → length).   
-
-2. **Layered parallel merge** (`parallel_merge`)
-
-   * Group up to `fanin` runs; each worker k-way merges its group, summing tfs for identical `(term, docid)`, and writes a new **RUN1**.
-   * Repeat for multiple rounds or stop early via `--rounds`. 
-
-3. **Final merger** (`merger`)
-
-   * Single-writer k-way merge over remaining RUN1s: maintain a heap of the current head from each run; whenever the term changes, flush the accumulated postings through `ListWriter.add_term()` and record the returned lexicon entry. 
-
----
-
-## 4. File Formats
-
-### 4.1 Binary RUN1 (intermediate)
-
-* **Layout:** `MAGIC="RUN1"`; then for each term: `[len(term)][term_utf8][n][docid[0..n-1]][freq[0..n-1]]` as little-endian uint32 arrays.
-* **Iteration:** `BinaryRunReader` streams `(term, docid, freq)` group-by-term without unnecessary copies. 
-
-### 4.2 Blocked postings (final)
-
-* Each term becomes `nblocks` blocks; each block stores encoded docIDs and freqs. Metadata per term (`offset, df, nblocks, blocks[]`) is returned by `ListWriter.add_term` and stored in the lexicon; the reader relies on this directory to read back full postings. Codecs: `"raw"` (4-byte uint32) or `"varbyte"` (docIDs as gaps + VB freqs).  
-
-### 4.3 Lexicon
-
-* A pickle mapping `term → entry`, where each entry includes `offset, df, nblocks, blocks[]`, enabling `O(log B)` seek and efficient streaming.  
-
----
-
-## 5. Search Algorithms
-
-* **Boolean DAAT**: `PostingsCursor` objects advance in docID order; AND sorts terms by increasing df to reduce work; OR uses either a specialized two-way merge or a heap-based n-way union. 
-* **BM25 ranking**: `Ranker` computes standard BM25 with `(k1, b)` tunables; `Searcher.search()` builds a tiny per-query index from on-disk postings, filters by AND/OR semantics, then scores. Requires `doc_lengths.pkl`.   
-
----
-
-## 6. Performance & Sizes (how to report)
-
-* The codebase includes timing scaffolding in the CLI and `searcher.__main__` to print Boolean vs DAAT timing and BM25 samples. On typical desktop hardware, DAAT queries are low-millisecond scale on the 1M-doc slice; your full corpus will vary by SSD bandwidth and parameter choices (`batch_size`, `fanin`, codec).
-* To report **index sizes**:
-
-```bash
-python - <<'PY'
-import os
-for p in ["data/index.postings","data/index.lexicon","data/doc_lengths.pkl"]:
-    if os.path.exists(p): print(p, os.path.getsize(p), "bytes")
-PY
+```
+              ┌────────────────────────┐
+ TSV Corpus → │ build_runs_mp (MP)     │  parses+tokenizes per batch
+              │ - in-memory per-batch  │  → RUN1 files: data/runs/run_*.run
+              │ - writes RUN1          │  → doc_lengths.pkl (global, once)
+              └──────────┬─────────────┘
+                         │ many runs
+                         ▼
+              ┌────────────────────────┐
+              │ parallel_merge         │  layered, per-group k-way merge
+              │ - fan-in (e.g., 8)     │  → fewer RUN1s in data/tmp_merge/round_xxxx
+              │ - N workers            │
+              └──────────┬─────────────┘
+                         │ few runs (e.g., 12)
+                         ▼
+              ┌────────────────────────┐
+              │ final merger           │  global k-way merge
+              │ - ListWriter blocks    │  → index.postings (binary)
+              │ - write lexicon        │  → index.lexicon (pickle)
+              └──────────┬─────────────┘
+                         │
+                         ▼
+              ┌────────────────────────┐
+              │ searcher (DAAT/BM25)   │
+              └────────────────────────┘
 ```
 
-* To test codec impact: build the same index twice by switching `ListWriter(codec="raw"|"varbyte")` and compare sizes vs query latencies using the same search harness. (The reader auto-detects the codec per term if left as `"auto"`.)  
+**Binary RUN1** (intermediate): grouped by term; for each term store `n`, then `n` `uint32` docIDs and `n` `uint32` freqs (little-endian). The reader streams group-by-term with minimal copies.
+
+**Final index**: `index.postings` is **block-oriented** (default 128 docs/block) with codecs (`raw`, `varbyte`). `index.lexicon` stores for each term: postings file offset, `df`, number of blocks, and a per-block directory (`offset`, `last_docid`, `doc_bytes`, `freq_bytes`, `codec`). The reader uses this directory for fast block seeks/streaming.
 
 ---
 
-## 7. Limitations
+## 3) Components & how they connect
 
-* **Final merge is single-writer** (global order must be preserved); the project uses layered parallel merge to reduce inputs aggressively and then a single pass to produce the final postings/lexicon. 
-* **No positional index** (postings hold docIDs and term frequencies only).
-* **No WAND/BMW pruning yet** in ranked DAAT; correctness first.
-* **`doc_lengths.pkl` must match** the docID universe of the index; if you rebuild runs from a different slice, regenerate `doc_lengths.pkl` via the same run set to avoid KeyErrors in BM25. 
-
----
-
-## 8. Module Guide
-
-* `engine/parser.py` — robust tokenizer for TSV text; keeps tokens like `u.s.` or `3.14` intact; provides streaming APIs.  
-* `engine/build_runs_mp.py` — multiprocessing builder for **binary RUN1** runs; persists `doc_lengths.pkl` after aggregating worker outputs.  
-* `engine/runio.py` — `BinaryRunWriter/Reader` for grouped-binary runs (and legacy TSV helpers kept for tests). 
-* `engine/parallel_merge.py` — layered parallel merge; inputs may be RUN1 or TSV; outputs **RUN1**; supports `--rounds`. 
-* `engine/merger.py` — final k-way merge from runs to **blocked postings** + **lexicon**. 
-* `engine/listio.py` — `ListWriter`/`ListReader` (blocked layout, raw/varbyte codecs, per-block directory).  
-* `engine/lexicon.py` — pickle lexicon map: term → entry metadata (offset, df, nblocks, blocks). 
-* `engine/searcher.py` — high-level façade that reuses already opened lexicon and reader; Boolean & ranked paths. 
-* `engine/ranker.py` — BM25 implementation and end-to-end `score()` pipeline. 
-* `engine/utils.py` — persistence helpers for `doc_lengths.pkl` and (legacy) pickled inverted indices. 
-* `engine/paths.py` — central paths for `index.postings`, `index.lexicon`, `doc_lengths.pkl`, corpus TSV. 
+* **`parser.py`** — robust TSV text cleaning + tokenization (keeps tokens like `u.s.` or `3.14` intact).
+* **`build_runs_mp.py`** — multiprocessing builder of **sorted RUN1** files; aggregates per-doc lengths from workers and writes `doc_lengths.pkl` once so it matches the docID universe of these runs. 
+* **`runio.py`** — `BinaryRunWriter/Reader`: grouped-binary RUN1 I/O; the reader uses memoryviews for efficient iteration.
+* **`parallel_merge.py`** — layered parallel merge; per job k-way merges up to `fanin` runs and writes a new RUN1; `--rounds` lets you stop after 1 round (e.g., 89→12).
+* **`merger.py`** — final single-writer k-way merge: maintain a heap of (term, docid, tf, src); when the term changes, flush the accumulated `{docid: tf}` to the `ListWriter` (block encoder) and record the returned lexicon entry; at the end, save lexicon and close writer. 
+* **`listio.py`** — `ListWriter/Reader`: block layout, `raw`/`varbyte` codecs, per-block directory, sequential and random access.
+* **`lexicon.py`** — persistent map `term → {offset, df, nblocks, blocks[]}` (pickle).
+* **`searcher.py`** — façade that loads the lexicon and postings reader; wires **Boolean DAAT** (`daat.py`) and **BM25** (`daat_ranker.py`), using `doc_lengths.pkl` for ranking.
 
 ---
 
-## 9. Reproducibility & Environment Notes
+## 4) Internals (why it’s fast enough)
 
-* **Windows multiprocessing**: `if __name__ == "__main__": main()` guard is present; prefer `python -m engine.<module>` to avoid path surprises. 
-* **CRLF paths**: when piping a list of files, ensure no trailing `\r` in argument files; or just use globbing (e.g., `round_0000/*.run`) as shown above.
+* **Binary RUN1 removes text parsing overhead** during merge (no `split()/int()` hot-loops).
+* **Layered parallel merge** reduces fan-in before the last pass. The final pass must keep global term order and single output pointer, so we put parallelism before it.
+* **Blocked postings + per-block directory** let DAAT cursors skip/seek efficiently and decode in small chunks; `raw` keeps decoding trivial; `varbyte` trades CPU for I/O.
 
 ---
 
-## 10. Troubleshooting
+## 5) Measured build & search times (from `benchmark.txt`)
 
-* **`KeyError: <docid>` in BM25** → your `doc_lengths.pkl` doesn’t match the index’s docIDs (e.g., you briefly re-indexed a different slice). Rebuild runs and `doc_lengths.pkl` together from the same corpus slice. 
-* **Searcher returns empty results for a term** → the term isn’t in the lexicon; `Searcher._get_postings_dict()` returns `{}` if not found. 
-* **Slow final merge** → expected (single-writer). Use `parallel_merge` with a larger `batch_size` during build or smaller `fanin` per round to reduce input fan-in before the last pass. 
+### Full dataset (~8.84M docs)
+
+* **Build runs** (workers=8, batch=100k): `real 4m32.633s` (89 runs) 
+* **Parallel merge** (one round, fanin=8, workers=8): `real 5m10.382s` → **12 outputs** 
+* **Final merger** (12 → index, `--codec raw --block 128`): `real 18m33.593s` (postings 2,815,133,072 bytes; 3,321,136 terms) 
+
+### 1M-doc slice (for reproducibility)
+
+* **Parser only**: `real 1m43.765s` 
+* **Direct indexer (baseline)**: `real 2m17.967s` (686,254 terms) 
+* **Build runs (batch=100k, workers=4)**: `real 1m7.835s` (10 runs) 
+* **Build runs (batch=50k, workers=4)**: `real 1m3.639s` (20 runs) 
+* **Merger** (these runs → index): `real 1m59.295s` 
+* **Searcher demo**: Boolean/DAAT equality + timings, BM25 examples printed in the log (see file for per-query numbers). 
+
+> Notes: The final pass is single-writer by design; the time reductions primarily come from (a) fewer runs via larger `batch_size`, and (b) one-round parallel merge to shrink 89→~12 before the final k-way.
+
+---
+
+## 6) Final index sizes (your run)
+
+From your screenshot (full corpus):
+
+* `index.postings`: **~2,749,154 KB (~2.62 GiB)**
+* `index.lexicon`: **~314,030 KB**
+* `doc_lengths.pkl`: **~60,340 KB**
+
+(These match the final-merge log that wrote ~2.815 GB postings and ~3.32M terms. )
+
+---
+
+## 7) Limitations & gotchas
+
+* **Final merge is not parallel** (global order + single sink). Fix is to reduce inputs before it (you’re already doing one-round parallel merge).
+* **`doc_lengths.pkl` must match the docID universe** produced by the runs used for the final index. If you rebuild a different slice (e.g., only 1M) and reuse the old `doc_lengths.pkl`, BM25 will KeyError on unseen docIDs.
+* No positional index; postings hold docIDs + TFs only.
+* No impact-ordered pruning (WAND/BMW) yet; DAAT is correctness-first.
+
+---
+
+## 8) Tuning cheat-sheet
+
+* **`build_runs_mp`**: pick `batch_size` as large as RAM allows to reduce run count; set `--workers` ≈ physical cores.
+* **`parallel_merge`**: start with `--fanin 8 --workers 8 --rounds 1` to halve end-to-end time for big K; if CPU and disk are under-utilized, try `workers=10`.
+* **`merger`**: `--block 128` is a good default; `--codec raw` keeps queries fast. If I/O dominates and CPU is idle, try `--codec varbyte` to shrink postings (you already tested correctness/perf).
+
+---
+
+## 9) File map (where things land)
+
+* `data/runs/run_*.run` — binary RUN1 intermediate files (grouped by term).
+* `data/tmp_merge/round_0000/run_*.run` — outputs of the one-round parallel merge.
+* `data/index.postings` — final **blocked** postings (binary).
+* `data/index.lexicon` — lexicon with per-term block directory (pickle).
+* `data/doc_lengths.pkl` — `docid → length` used by BM25.

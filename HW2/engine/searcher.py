@@ -275,7 +275,7 @@ if __name__ == "__main__":
     queries = [
         "overturned carriage",
         "communication policy",
-        "machine learning",
+        "manhattan project bomb",
         "u.s policy",
         "3.14 math",
     ]
