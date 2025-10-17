@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Engine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8f9fa;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-top: 60px;
+        }
+
+        .logo {
+            font-size: 3rem;
+            font-weight: 300;
+            color: #4285f4;
+            margin-bottom: 20px;
+            letter-spacing: -2px;
+        }
+
+        .search-container {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .search-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .search-input-group {
+            display: flex;
+            align-items: center;
+            border: 2px solid #e0e0e0;
+            border-radius: 24px;
+            padding: 12px 20px;
+            transition: border-color 0.3s ease;
+        }
+
+        .search-input-group:focus-within {
+            border-color: #4285f4;
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.1);
+        }
+
+        .search-input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 16px;
+            padding: 8px 12px;
+            background: transparent;
+        }
+
+        .search-icon {
+            color: #9aa0a6;
+            margin-right: 12px;
+        }
+
+        .mode-selection {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .mode-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .mode-option:hover {
+            border-color: #4285f4;
+        }
+
+        .mode-option.selected {
+            border-color: #4285f4;
+            background-color: #4285f4;
+            color: white;
+        }
+
+        .mode-option input[type="radio"] {
+            margin: 0;
+        }
+
+        .search-button {
+            background: #4285f4;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 24px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+            align-self: center;
+        }
+
+        .search-button:hover {
+            background: #3367d6;
+        }
+
+        .search-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .results-container {
+            margin-top: 30px;
+        }
+
+        .search-info {
+            color: #5f6368;
+            font-size: 14px;
+            margin-bottom: 20px;
+            padding: 0 10px;
+        }
+
+        .result-item {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: box-shadow 0.3s ease;
+        }
+
+        .result-item:hover {
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        }
+
+        .result-title {
+            font-size: 18px;
+            font-weight: 500;
+            color: #1a0dab;
+            margin-bottom: 8px;
+            text-decoration: none;
+        }
+
+        .result-title:hover {
+            text-decoration: underline;
+        }
+
+        .result-url {
+            color: #006621;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .result-snippet {
+            color: #545454;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .result-score {
+            color: #5f6368;
+            font-size: 12px;
+            margin-top: 8px;
+            font-style: italic;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #5f6368;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #4285f4;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #fce8e6;
+            color: #d93025;
+            padding: 16px;
+            border-radius: 8px;
+            margin: 20px 0;
+            border-left: 4px solid #d93025;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #5f6368;
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .logo {
+                font-size: 2rem;
+            }
+            
+            .mode-selection {
+                flex-direction: column;
+                align-items: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">SearchEngine</div>
+        </div>
+
+        <div class="search-container">
+            <form class="search-form" id="searchForm">
+                <div class="search-input-group">
+                    <span class="search-icon">🔍</span>
+                    <input 
+                        type="text" 
+                        class="search-input" 
+                        id="queryInput" 
+                        placeholder="Enter your search terms..."
+                        autocomplete="off"
+                        required
+                    >
+                </div>
+
+                <div class="mode-selection">
+                    <label class="mode-option selected" for="conjunctive">
+                        <input type="radio" id="conjunctive" name="mode" value="AND" checked>
+                        <span>Conjunctive (AND)</span>
+                    </label>
+                    <label class="mode-option" for="disjunctive">
+                        <input type="radio" id="disjunctive" name="mode" value="OR">
+                        <span>Disjunctive (OR)</span>
+                    </label>
+                </div>
+
+                <button type="submit" class="search-button" id="searchButton">
+                    Search
+                </button>
+            </form>
+        </div>
+
+        <div class="results-container" id="resultsContainer">
+            <!-- Results will be populated here -->
+        </div>
+    </div>
+
+    <script>
+        // Handle mode selection styling
+        document.querySelectorAll('input[name="mode"]').forEach(radio => {
+            radio.addEventListener('change', function() {
+                document.querySelectorAll('.mode-option').forEach(option => {
+                    option.classList.remove('selected');
+                });
+                this.closest('.mode-option').classList.add('selected');
+            });
+        });
+
+        // Handle form submission
+        document.getElementById('searchForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const query = document.getElementById('queryInput').value.trim();
+            const mode = document.querySelector('input[name="mode"]:checked').value;
+            const searchButton = document.getElementById('searchButton');
+            const resultsContainer = document.getElementById('resultsContainer');
+            
+            if (!query) {
+                return;
+            }
+
+            // Show loading state
+            searchButton.disabled = true;
+            searchButton.textContent = 'Searching...';
+            resultsContainer.innerHTML = `
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <div>Searching for "${query}"...</div>
+                </div>
+            `;
+
+            try {
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        mode: mode
+                    })
+                });
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                displayResults(data, query);
+                
+            } catch (error) {
+                console.error('Search error:', error);
+                resultsContainer.innerHTML = `
+                    <div class="error">
+                        <strong>Search Error:</strong> ${error.message}
+                    </div>
+                `;
+            } finally {
+                searchButton.disabled = false;
+                searchButton.textContent = 'Search';
+            }
+        });
+
+        function displayResults(data, query, networkTime) {
+            const resultsContainer = document.getElementById('resultsContainer');
+            
+            if (data.error) {
+                resultsContainer.innerHTML = `
+                    <div class="error">
+                        <strong>Error:</strong> ${data.error}
+                    </div>
+                `;
+                return;
+            }
+
+            const { results, searchTime, totalResults } = data;
+            
+            if (!results || results.length === 0) {
+                resultsContainer.innerHTML = `
+                    <div class="no-results">
+                        <h3>No results found</h3>
+                        <p>Try different keywords or check your spelling.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = `
+                <div class="search-info">
+                    Found ${totalResults} results for "${query}" 
+                    (${searchTime.toFixed(3)}ms search time)
+                </div>
+            `;
+
+            results.forEach((result, index) => {
+                // const snippet = result.snippet || (result.content ? result.content.substring(0, 200) + '...' : 'No content available');
+                const score = result.score ? result.score.toFixed(3) : 'N/A';
+                
+                html += `
+                    <div class="result-item">
+                        <div class="result-url">Document ID: ${result.docid}</div>
+                        <div class="result-score">Score: ${score}</div>
+                    </div>
+                `;
+            });
+
+            resultsContainer.innerHTML = html;
+        }
+
+        // Focus on search input when page loads
+        document.getElementById('queryInput').focus();
+    </script>
+</body>
+</html>
