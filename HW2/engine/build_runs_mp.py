@@ -30,8 +30,13 @@ Outputs:
 How to use:
 time python -m engine.build_runs_mp --input data/collection.tsv --outdir data/runs --batch-size 100000 --workers 8
 
-After this, run your existing merger:
-    python -m engine.merger data/runs/run_*.tsv
+After this, run parallel_merge.py:
+    python -m engine.parallel_merge data/runs/*.run
+    python -m engine.parallel_merge --fanin 8 --workers 8 --tmpdir data/tmp_merge data/runs/*.tsv
+Set the number of workers to the amount of physical cores!
+
+parallel_merge.py will merge the small runs to produce larger runs. Finally, to finish indexing, run merger.py:
+    python -m engine.merger data/tmp_merge/round_000*/run_*.run
 """
 
 from __future__ import annotations

@@ -11,15 +11,17 @@ Strategy
     round 1: repeat on the newly produced runs
     ...
   until the number of runs <= fanin or == 1.
+- The default setting only uses 1 layer, because it's sufficient, given we have 89 runs in total to merge.
 - Each group-merge produces *another run* (binary RUN1), NOT the final index.
   After the last round, use engine.merger to write the final postings/index.
 
 CLI
 ---
   python -m engine.parallel_merge data/runs/*.run
-  python -m engine.parallel_merge --fanin 12 --workers 6 --tmpdir data/tmp_merge data/runs/*.tsv
+  python -m engine.parallel_merge --fanin 8 --workers 8 --tmpdir data/tmp_merge data/runs/*.tsv
+Set the number of workers to the amount of physical cores!
 
-To finish to index:
+To finish indexing and produce a single large postings file (in blocked, binary format):
   python -m engine.merger data/tmp_merge/round_000*/run_*.run
 """
 

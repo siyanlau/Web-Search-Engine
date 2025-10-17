@@ -226,7 +226,6 @@ class ListReader:
         return None
 
 
-
 class VarByteCodec:
     """
     VarByte + gap encoding for postings.

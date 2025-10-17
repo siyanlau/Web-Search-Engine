@@ -428,3 +428,16 @@ Lexicon saved: 3321136 terms to data/index.lexicon
 real    18m33.593s
 user    0m0.138s
 sys     0m0.732s
+
+
+
+$ time python -m engine.merger data/tmp_merge/round_0000/*.run --codec varbyte --block 128
+[merger] consumed=351,000,000  heap=11  term='your'
+ListWriter: wrote 826237485 bytes to data/index.postings
+Lexicon saved: 3321136 terms to data/index.lexicon
+[merger] DONE  postings -> data/index.postings
+[merger] DONE  lexicon  -> data/index.lexicon
+
+real    15m0.284s
+user    0m0.171s
+sys     0m0.512s

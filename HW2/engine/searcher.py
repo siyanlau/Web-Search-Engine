@@ -208,25 +208,6 @@ if __name__ == "__main__":
             if isinstance(first, int):  # [docid, ...]
                 return set(obj)
         return set()
-
-    # # Helper: DAAT boolean result (set of docids)
-    # def daat_set(query: str, mode: str = "AND"):
-    #     lex = Lexicon.load(LEXICON_PATH).map
-    #     reader = ListReader(POSTINGS_PATH)
-    #     terms = [t for t in query.lower().split() if t in lex]
-    #     if not terms:
-    #         reader.close()
-    #         return set()
-    #     cursors = [PostingsCursor(reader, t, lex[t]) for t in terms]
-    #     if mode.upper() == "AND":
-    #         res = set(boolean_and_daat(cursors))
-    #     elif mode.upper() == "OR":
-    #         res = set(boolean_or_daat(cursors))
-    #     else:
-    #         reader.close()
-    #         raise ValueError("mode must be AND or OR")
-    #     reader.close()
-    #     return res
     
     lex = Lexicon.load(LEXICON_PATH).map
     reader = ListReader(POSTINGS_PATH)
@@ -275,9 +256,12 @@ if __name__ == "__main__":
     queries = [
         "overturned carriage",
         "communication policy",
+        "manhattan project",
         "manhattan project bomb",
         "u.s policy",
         "3.14 math",
+        "machine learning",
+        "archie moore bash ali"
     ]
 
     print("=== Boolean vs DAAT (set equality & timing) ===")
