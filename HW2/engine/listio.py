@@ -8,7 +8,7 @@ BLOCK_SIZE = 128  # adjustable
 
 class ListWriter:
     """
-    Writes term postings into a binary file in blocked format (no compression).
+    Writes term postings into a binary file in blocked format. 
     Each block stores:
       uint32 n_in_block
       uint32 last_docid

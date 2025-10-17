@@ -220,7 +220,6 @@ if __name__ == "__main__":
         if not terms:
             return set()
 
-        # AND：按 df 升序排列，减少推进成本（不改任何存储结构）
         if mode.upper() == "AND":
             terms.sort(key=lambda t: lex_map[t]["df"])
 
@@ -228,7 +227,6 @@ if __name__ == "__main__":
         if mode.upper() == "AND":
             return set(boolean_and_daat(cursors))
         else:
-            # 小 k（≤2）时直接两路归并，避免 heap 常数
             if len(cursors) == 2:
                 a, b = cursors
                 out = set()
@@ -260,7 +258,6 @@ if __name__ == "__main__":
         "manhattan project bomb",
         "u.s policy",
         "3.14 math",
-        "machine learning",
         "archie moore bash ali"
     ]
 

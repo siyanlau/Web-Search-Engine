@@ -48,7 +48,7 @@ class Parser:
                 try:
                     docid = int(docid_str)
                 except ValueError:
-                    continue
+                    continue 
 
                 # Clean weird encodings and HTML
                 text = fix_text(html.unescape(text))
